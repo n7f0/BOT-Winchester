@@ -40,13 +40,13 @@ CHAT_ADMIN_LOGS_ID = 1515876971089760326
 CHAT_RANK_ID = 1515877095685750894
 LOG_REGISTROS_ID = int(os.getenv("LOG_REGISTROS_ID", "1498349960062570740"))
 
-# Outros IDs (não usados em painéis removidos, mas mantidos para compatibilidade)
+# Outros IDs
 CANAL_LOGS_COMPRA_VENDA_ID = int(os.getenv("CANAL_LOGS_COMPRA_VENDA_ID", "1509201907842023444"))
 CHAT_PEDIDOS_LOG_ID = int(os.getenv("CHAT_PEDIDOS_LOG_ID", "0"))
 
 # Grupos de permissões
-CARGO_REGISTRAR_ACAO_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
-CARGO_REMOVER_MEMBRO_IDS = CARGO_REGISTRAR_ACAO_IDS
+CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
+CARGO_REMOVER_MEMBRO_IDS = CARGO_ADMIN_IDS
 
 # ========= BANCO DE DADOS =========
 dados = {
@@ -154,7 +154,7 @@ def is_membro(member):
     return tem_cargo(member, [CARGO_MEMBRO_ID])
 
 def pode_registrar_acao(member):
-    return tem_cargo(member, CARGO_REGISTRAR_ACAO_IDS)
+    return tem_cargo(member, CARGO_ADMIN_IDS)
 
 def pode_aprovar_set(member):
     return pode_registrar_acao(member)
@@ -162,7 +162,7 @@ def pode_aprovar_set(member):
 def pode_remover_membro(member):
     return tem_cargo(member, CARGO_REMOVER_MEMBRO_IDS)
 
-# ========= RANKING (sem CHUMBO, CAPSULA, PÓLVORA) =========
+# ========= RANKING (apenas produtos de luxo) =========
 async def atualizar_ranking():
     canal = bot.get_channel(CHAT_RANK_ID)
     if not canal:
@@ -176,15 +176,11 @@ async def atualizar_ranking():
             continue
         try:
             user = await bot.fetch_user(int(uid))
-            # Só produtos de luxo
             tot_relogio = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "RELÓGIO DE LUXO")
             tot_obra = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "OBRA DE ARTE")
             tot_bebida = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "BEBIDA IMPORTADA")
             tot_acoes = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "AÇÕES DE EMPRESA")
             tot_nft = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "CARTEIRA NFT")
-            tot_pag = sum(p["valor"] for p in data.get("pagamentos", []))
-            qtd_pag = len(data.get("pagamentos", []))
-            din_sujo = data.get("dinheiro_sujo", 0)
             usuarios_data.append({
                 "nome": user.name,
                 "user_id": uid,
@@ -192,10 +188,7 @@ async def atualizar_ranking():
                 "total_obra": tot_obra,
                 "total_bebida": tot_bebida,
                 "total_acoes": tot_acoes,
-                "total_nft": tot_nft,
-                "total_pagamentos": tot_pag,
-                "quantidade_pagamentos": qtd_pag,
-                "dinheiro_sujo": din_sujo
+                "total_nft": tot_nft
             })
         except:
             continue
@@ -211,24 +204,6 @@ async def atualizar_ranking():
             emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}°"
             txt += f"{emoji} **{u['nome']}** - {u[key]:,} itens\n"
         emb.add_field(name=nome, value=txt or "Nenhum dado ainda", inline=False)
-
-    lista_salario = sorted(usuarios_data, key=lambda x: x["total_pagamentos"], reverse=True)[:5]
-    txt = ""
-    for i, u in enumerate(lista_salario, 1):
-        if u["total_pagamentos"] == 0:
-            continue
-        emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}°"
-        txt += f"{emoji} **{u['nome']}** - R$ {u['total_pagamentos']:,.2f} ({u['quantidade_pagamentos']} pagamentos)\n"
-    emb.add_field(name="💰 TOP SALÁRIO", value=txt or "Nenhum dado ainda", inline=False)
-
-    lista_sujo = sorted(usuarios_data, key=lambda x: x["dinheiro_sujo"], reverse=True)[:5]
-    txt = ""
-    for i, u in enumerate(lista_sujo, 1):
-        if u["dinheiro_sujo"] == 0:
-            continue
-        emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}°"
-        txt += f"{emoji} **{u['nome']}** - R$ {u['dinheiro_sujo']:,.2f}\n"
-    emb.add_field(name="💀 DINHEIRO SUJO", value=txt or "Nenhum dado ainda", inline=False)
 
     await canal.send(embed=emb, view=RankingView())
 
@@ -255,7 +230,6 @@ class ConfirmarResetView(View):
         await interaction.response.defer(ephemeral=True, thinking=True)
         dados["usuarios"] = {}
         dados["caixa_semana"] = {}
-        dados["dinheiro_sujo"] = {}
         salvar_dados()
         await log_acao("reset_rank", interaction.user, f"Ranking resetado por {interaction.user.mention}", 0x4f545c)
         await log_admin("RANKING RESETADO", f"Admin: {interaction.user.mention}\nData: {datetime.now().strftime('%d/%m/%Y %H:%M')}", 0x4f545c)
@@ -425,7 +399,7 @@ async def restaurar_canais_farms():
                     tipo = "ADMIN" if is_admin(user) else "MEMBRO"
                     embed = discord.Embed(
                         title="🔐 SEU CANAL PRIVADO",
-                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS PARA {tipo}:**\n📦 **Farm Produtos** - Registrar farm de produtos (com print)\n💰 **Farm Dinheiro Sujo** - Registrar dinheiro sujo (com print)\n✏️ **Editar Registro** - Corrigir um registro\n📋 **Meus Registros** - Ver histórico completo",
+                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos** - Registrar farm de produtos (qualquer membro)\n💰 **Registrar Dinheiro Sujo (Admin)** - Apenas cargos 00,01,02 e Gerente\n✏️ **Editar Registro** - Corrigir um registro\n📋 **Meus Registros** - Ver histórico completo",
                         color=0x2c2f33
                     )
                     if tipo == "ADMIN":
@@ -433,14 +407,13 @@ async def restaurar_canais_farms():
                     await canal.send(embed=embed, view=view)
 
 # ========= MODAIS DE FARM =========
-class DinheiroSujoModal(Modal, title="💰 Registrar Dinheiro Sujo"):
-    quantidade = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
-    membro = TextInput(label="Membro que recebeu o dinheiro (ID ou @)", placeholder="Ex: @usuario ou ID", required=True)
-    produtos_devolvidos = TextInput(label="Produtos que ele devolveu (opcional)", placeholder="Ex: 5 relógios, 2 obras", required=False)
+class DinheiroSujoAdminModal(Modal, title="💰 Registrar Dinheiro Sujo (Admin)"):
+    valor = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
+    membro_recebedor = TextInput(label="Membro que recebeu o dinheiro", placeholder="ID ou @ do membro", required=True)
 
     def __init__(self, user_id, user_name, canal):
         super().__init__()
-        self.user_id = user_id
+        self.user_id = user_id  # dono do canal privado (quem vai receber o dinheiro sujo no registro)
         self.user_name = user_name
         self.canal = canal
 
@@ -450,13 +423,11 @@ class DinheiroSujoModal(Modal, title="💰 Registrar Dinheiro Sujo"):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            valor = float(self.quantidade.value.replace(",", "."))
+            valor = float(self.valor.value.replace(",", "."))
         except ValueError:
             await interaction.followup.send("Valor inválido!", ephemeral=True)
             return
-        membro_input = self.membro.value.strip()
-        # tentar extrair ID
-        import re
+        membro_input = self.membro_recebedor.value.strip()
         ids = re.findall(r'\d+', membro_input)
         membro_id = int(ids[0]) if ids else None
         if not membro_id:
@@ -466,7 +437,6 @@ class DinheiroSujoModal(Modal, title="💰 Registrar Dinheiro Sujo"):
         if not membro_obj:
             await interaction.followup.send("Membro não encontrado no servidor.", ephemeral=True)
             return
-        produtos_dev = self.produtos_devolvidos.value.strip() or "Nenhum"
 
         await interaction.followup.send("📸 Agora envie a **print do comprovante** aqui no canal.", ephemeral=True)
         def check(m):
@@ -489,14 +459,13 @@ class DinheiroSujoModal(Modal, title="💰 Registrar Dinheiro Sujo"):
             "print_url": imagem_url,
             "registrado_por": interaction.user.id,
             "membro_recebedor": membro_id,
-            "membro_nome": membro_obj.name,
-            "produtos_devolvidos": produtos_dev
+            "membro_nome": membro_obj.name
         }
         dados["usuarios"][str(self.user_id)]["transacoes_dinheiro_sujo"].append(transacao)
         dados["usuarios"][str(self.user_id)]["dinheiro_sujo"] = sum(t["valor"] for t in dados["usuarios"][str(self.user_id)]["transacoes_dinheiro_sujo"])
         salvar_dados()
 
-        embed = discord.Embed(title="💰 DINHEIRO SUJO REGISTRADO", description=f"**Usuário:** <@{self.user_id}>\n**Valor:** R$ {valor:,.2f}\n**Membro que recebeu:** {membro_obj.mention}\n**Produtos devolvidos:** {produtos_dev}\n**Registrado por:** {interaction.user.mention}", color=0x4f545c, timestamp=datetime.now())
+        embed = discord.Embed(title="💰 DINHEIRO SUJO REGISTRADO", description=f"**Usuário:** <@{self.user_id}>\n**Valor:** R$ {valor:,.2f}\n**Membro que recebeu:** {membro_obj.mention}\n**Registrado por:** {interaction.user.mention}", color=0x4f545c, timestamp=datetime.now())
         embed.set_image(url=imagem_url)
         await self.canal.send(embed=embed)
         canal_registros = bot.get_channel(LOG_REGISTROS_ID)
@@ -521,7 +490,6 @@ class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
         self.canal = canal
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Primeiro, responder o modal com defer para não expirar
         await interaction.response.defer(ephemeral=True, thinking=True)
         produtos = []
         for campo, nome in [(self.relogio, "RELÓGIO DE LUXO"), (self.obra, "OBRA DE ARTE"), (self.bebida, "BEBIDA IMPORTADA"), (self.acoes, "AÇÕES DE EMPRESA"), (self.nft, "CARTEIRA NFT")]:
@@ -540,7 +508,6 @@ class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
             await interaction.followup.send("Slot deve ser um número!", ephemeral=True)
             return
 
-        # Agora pedir a print
         await interaction.followup.send("📸 Agora envie a **print da farm** aqui no canal.", ephemeral=True)
         def check(m):
             return m.author == interaction.user and m.channel == self.canal and m.attachments and any(a.content_type and a.content_type.startswith('image/') for a in m.attachments)
@@ -688,7 +655,6 @@ class FechamentoCaixaModal(Modal, title="📊 Finalizar Fechamento"):
         user_data = dados["usuarios"][str(self.user_id)]
         if pagamento_final > 0:
             user_data["pagamentos"].append({"valor": pagamento_final, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "admin": interaction.user.id, "admin_nome": interaction.user.name, "tipo": "Fechamento de Caixa Semanal", "detalhes": {"total_sujo": self.total_sujo, "lavagem": self.lavagem, "faccao": self.faccao, "membro_base": self.membro_base, "bonus": bonus_valor}, "print_url": imagem_url})
-        # calcular totais de produtos (luxo)
         tot_relogio = sum(p.get("quantidade", 0) for f in user_data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "RELÓGIO DE LUXO")
         tot_obra = sum(p.get("quantidade", 0) for f in user_data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "OBRA DE ARTE")
         tot_bebida = sum(p.get("quantidade", 0) for f in user_data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "BEBIDA IMPORTADA")
@@ -747,7 +713,7 @@ class FechamentoCaixaModal(Modal, title="📊 Finalizar Fechamento"):
         await log_acao("fechar_caixa", interaction.user, f"Usuário: {self.user_name}\nPagamento: R$ {pagamento_final}", 0x99aab5)
         await atualizar_ranking()
 
-# ========= EDIÇÃO (simplificada) =========
+# ========= EDIÇÃO (simplificada, apenas produtos de luxo) =========
 class EditarRegistroSelect(Select):
     def __init__(self, user_id, user_name):
         self.user_id = str(user_id)
@@ -1019,12 +985,12 @@ class FarmChannelView(View):
             return
         await interaction.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel))
 
-    @discord.ui.button(label="💰 Farm Dinheiro Sujo", style=discord.ButtonStyle.secondary, emoji="💰", row=0)
-    async def farm_dinheiro_sujo(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="💰 Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0)
+    async def registrar_dinheiro_sujo_admin(self, interaction: discord.Interaction, button: Button):
         if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Você não tem permissão para registrar dinheiro sujo.", ephemeral=True)
+            await interaction.response.send_message("Apenas cargos 00,01,02 e Gerente podem registrar dinheiro sujo.", ephemeral=True)
             return
-        await interaction.response.send_modal(DinheiroSujoModal(self.user_id, self.user_name, interaction.channel))
+        await interaction.response.send_modal(DinheiroSujoAdminModal(self.user_id, self.user_name, interaction.channel))
 
     @discord.ui.button(label="✏️ Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", row=0)
     async def editar_registro(self, interaction: discord.Interaction, button: Button):
@@ -1252,7 +1218,7 @@ class NovoPedidoModal(Modal, title="📝 Novo Pedido"):
         embed.add_field(name="Valor Total", value=f"R$ {valor:,.2f}", inline=True)
         embed.add_field(name="Prazo", value=prazo, inline=True)
         embed.add_field(name="Descontado Caixa", value=descontado, inline=True)
-        embed.add_field(name="Distribuição (50/40/5/5)", value=f"Cliente: R$ {cliente_part:,.2f}\nMáquina: R$ {maquina_part:,.2f}\nFacção: R$ {fac_part:,.2f}\nMembros: R$ {membros_part:,.2f}", inline=False)
+        embed.add_field(name="Distribuição", value=f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({pcts['fac']}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)", inline=False)
         embed.set_footer(text=f"Criado por {interaction.user.name}")
         if canal_log:
             await canal_log.send(embed=embed)
@@ -1351,7 +1317,7 @@ class BotaoCriarCanalView(View):
             tipo = "ADMIN" if is_admin(interaction.user) else "MEMBRO"
             embed = discord.Embed(
                 title="🔐 SEU CANAL PRIVADO",
-                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS PARA {tipo}:**\n📦 **Farm Produtos** - Registrar farm de produtos (com print)\n💰 **Farm Dinheiro Sujo** - Registrar dinheiro sujo (com print)\n✏️ **Editar Registro** - Corrigir um registro\n📋 **Meus Registros** - Ver histórico completo",
+                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos** (qualquer membro)\n💰 **Registrar Dinheiro Sujo (Admin)** (cargos 00,01,02,Gerente)\n✏️ **Editar Registro**\n📋 **Meus Registros**",
                 color=0x2c2f33
             )
             if tipo == "ADMIN":
@@ -1437,12 +1403,10 @@ async def on_ready():
             )
             await canal_pedidos.send(embed=embed_pedidos, view=PedidoView())
 
-        # Botão de remover membro (adicionei no mesmo canal de criar-canal ou em outro lugar? Vou colocar no canal de criar-canal como um botão extra)
+        # Botão de remover membro no canal de criar-canal
         if categoria_painel:
-            # Vamos adicionar um segundo embed com botão de remover membro no mesmo canal "criar-canal"
             canal_criar = discord.utils.get(categoria_painel.channels, name="criar-canal")
             if canal_criar:
-                # Verificar se já existe mensagem com botão de remover
                 found = False
                 async for msg in canal_criar.history(limit=10):
                     if msg.author == bot.user and "Remover Membro" in (msg.content or ""):

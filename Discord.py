@@ -33,7 +33,6 @@ CHAT_RANK_ID = 1515877095685750894
 LOG_REGISTROS_ID = int(os.getenv("LOG_REGISTROS_ID", "1498349960062570740"))
 CHAT_PEDIDOS_LOG_ID = int(os.getenv("CHAT_PEDIDOS_LOG_ID", "0"))
 
-# NOVOS CANAIS
 CANAL_LIVES_PAINEL_ID = 1515937074359046235
 CANAL_COMPRA_VENDA_ID = 1515937419395072030
 CANAL_COMPRA_VENDA_LOGS_ID = 1515937452802572318
@@ -41,7 +40,6 @@ CANAL_COMPRA_VENDA_LOGS_ID = 1515937452802572318
 CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
 CARGO_REMOVER_MEMBRO_IDS = CARGO_ADMIN_IDS
 
-# Configurações de APIs (opcional, via env)
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -261,10 +259,10 @@ class ConfirmarResetView(View):
         await interaction.response.send_message("Reset cancelado.", ephemeral=True)
         self.stop()
 
-# ========= SISTEMA DE SET =========
-class SolicitarSetModal(Modal, title="📋 Solicitar SET"):
-    id_jogo = TextInput(label="ID", placeholder="Seu ID no sistema", required=True)
-    nome = TextInput(label="NOME", placeholder="Como quer ser chamado", required=True)
+# ========= SISTEMA DE REGISTRO (antigo SET) =========
+class SolicitarSetModal(Modal, title="📋 Registro"):
+    id_jogo = TextInput(label="Seu ID", placeholder="Digite seu ID no sistema", required=True)
+    nome = TextInput(label="Seu nome no jogo", placeholder="Como quer ser chamado", required=True)
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         self.id_val = self.id_jogo.value.strip()
@@ -300,15 +298,15 @@ class RecrutadorSelectView(View):
         canal_registros = bot.get_channel(CANAL_REGISTROS_SET_ID)
         if canal_registros:
             embed = discord.Embed(
-                title="🆕 NOVA SOLICITAÇÃO DE SET",
-                description=f"**NOME:** {self.modal.nome_val}\n**ID:** {self.modal.id_val}\n**Solicitante:** <@{interaction.user.id}>\n**Recrutador:** {recrutador.mention}\n**Data:** {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                title="🆕 NOVO REGISTRO",
+                description=f"**Nome:** {self.modal.nome_val}\n**ID:** {self.modal.id_val}\n**Solicitante:** <@{interaction.user.id}>\n**Recrutador:** {recrutador.mention}\n**Data:** {datetime.now().strftime('%d/%m/%Y %H:%M')}",
                 color=0x2c2f33,
                 timestamp=datetime.now()
             )
             embed.set_footer(text=f"ID: {pedido_id}")
             view = AprovarSetView(pedido_id, interaction.user.id, recrutador_id)
             await canal_registros.send(embed=embed, view=view)
-        await interaction.response.send_message("✅ Solicitação enviada! Aguarde a aprovação.", ephemeral=True)
+        await interaction.response.send_message("✅ Registro enviado! Aguarde a aprovação.", ephemeral=True)
         self.stop()
 
 class AprovarSetView(View):
@@ -317,10 +315,10 @@ class AprovarSetView(View):
         self.pedido_id = pedido_id
         self.solicitante_id = solicitante_id
         self.recrutador_id = recrutador_id
-    @discord.ui.button(label="✅ Aprovar SET", style=discord.ButtonStyle.success, emoji="✅")
+    @discord.ui.button(label="✅ Aprovar Registro", style=discord.ButtonStyle.success, emoji="✅")
     async def aprovar(self, interaction: discord.Interaction, button: Button):
         if not pode_aprovar_set(interaction.user):
-            await interaction.response.send_message("Você não tem permissão para aprovar SETs.", ephemeral=True)
+            await interaction.response.send_message("Você não tem permissão para aprovar registros.", ephemeral=True)
             return
         pedido = dados["sets_pendentes"].get(self.pedido_id)
         if not pedido or pedido["status"] != "pendente":
@@ -328,10 +326,10 @@ class AprovarSetView(View):
             return
         view = EscolherCargoView(self.pedido_id, self.solicitante_id, self.recrutador_id)
         await interaction.response.send_message("Selecione o cargo que deseja atribuir ao novo membro:", view=view, ephemeral=True)
-    @discord.ui.button(label="❌ Recusar SET", style=discord.ButtonStyle.danger, emoji="❌")
+    @discord.ui.button(label="❌ Recusar Registro", style=discord.ButtonStyle.danger, emoji="❌")
     async def recusar(self, interaction: discord.Interaction, button: Button):
         if not pode_aprovar_set(interaction.user):
-            await interaction.response.send_message("Você não tem permissão para recusar SETs.", ephemeral=True)
+            await interaction.response.send_message("Você não tem permissão para recusar registros.", ephemeral=True)
             return
         pedido = dados["sets_pendentes"].get(self.pedido_id)
         if not pedido or pedido["status"] != "pendente":
@@ -341,12 +339,12 @@ class AprovarSetView(View):
         salvar_dados()
         try:
             solicitante = await bot.fetch_user(self.solicitante_id)
-            await solicitante.send(f"❌ Seu pedido de SET foi **recusado** por {interaction.user.mention}.")
+            await solicitante.send(f"❌ Seu registro foi **recusado** por {interaction.user.mention}.")
         except:
             pass
-        embed = discord.Embed(title="❌ SET RECUSADO", description=f"Pedido ID: {self.pedido_id}\nRecusado por: {interaction.user.mention}", color=0x4f545c, timestamp=datetime.now())
+        embed = discord.Embed(title="❌ REGISTRO RECUSADO", description=f"Pedido ID: {self.pedido_id}\nRecusado por: {interaction.user.mention}", color=0x4f545c, timestamp=datetime.now())
         await interaction.message.edit(embed=embed, view=None)
-        await interaction.response.send_message("SET recusado com sucesso!", ephemeral=True)
+        await interaction.response.send_message("Registro recusado!", ephemeral=True)
 
 class EscolherCargoView(View):
     def __init__(self, pedido_id, solicitante_id, recrutador_id):
@@ -370,7 +368,7 @@ class EscolherCargoView(View):
             await interaction.response.send_message("Cargo não encontrado.", ephemeral=True)
             return
         try:
-            await membro.add_roles(cargo, reason=f"Aprovado SET por {interaction.user.name}")
+            await membro.add_roles(cargo, reason=f"Registro aprovado por {interaction.user.name}")
             pedido = dados["sets_pendentes"].get(self.pedido_id)
             if pedido:
                 pedido["status"] = "aprovado"
@@ -380,18 +378,18 @@ class EscolherCargoView(View):
             recrutador = guild.get_member(self.recrutador_id)
             if recrutador:
                 try:
-                    await recrutador.send(f"✅ O SET de {membro.mention} foi aprovado por {interaction.user.mention}!")
+                    await recrutador.send(f"✅ O registro de {membro.mention} foi aprovado por {interaction.user.mention}!")
                 except:
                     pass
             try:
-                await membro.send(f"✅ Parabéns! Seu SET foi **aprovado** e você recebeu o cargo {cargo.mention}. Bem-vindo(a)!")
+                await membro.send(f"✅ Parabéns! Seu registro foi **aprovado** e você recebeu o cargo {cargo.mention}. Bem-vindo(a)!")
             except:
                 pass
             canal_registros = bot.get_channel(CANAL_REGISTROS_SET_ID)
             if canal_registros:
                 embed = discord.Embed(
-                    title="✅ SET APROVADO",
-                    description=f"**NOME:** {pedido['solicitante_nome']}\n**ID:** {pedido['id_jogo']}\n**Solicitante:** <@{self.solicitante_id}>\n**Recrutador:** <@{self.recrutador_id}>\n**Cargo atribuído:** {cargo.mention}\n**Aprovado por:** {interaction.user.mention}",
+                    title="✅ REGISTRO APROVADO",
+                    description=f"**Nome:** {pedido['solicitante_nome']}\n**ID:** {pedido['id_jogo']}\n**Solicitante:** <@{self.solicitante_id}>\n**Recrutador:** <@{self.recrutador_id}>\n**Cargo atribuído:** {cargo.mention}\n**Aprovado por:** {interaction.user.mention}",
                     color=0x2c2f33,
                     timestamp=datetime.now()
                 )
@@ -399,7 +397,7 @@ class EscolherCargoView(View):
                     if msg.author == bot.user and msg.embeds and str(self.pedido_id) in (msg.embeds[0].footer.text if msg.embeds[0].footer else ""):
                         await msg.edit(embed=embed, view=None)
                         break
-            await interaction.response.send_message(f"✅ SET aprovado! Cargo {cargo.mention} atribuído a {membro.mention}.", ephemeral=True)
+            await interaction.response.send_message(f"✅ Registro aprovado! Cargo {cargo.mention} atribuído a {membro.mention}.", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"Erro ao atribuir cargo: {e}", ephemeral=True)
 
@@ -514,7 +512,6 @@ async def live_check_loop():
         role_mention = f"<@&{role_id}>" if role_id else ""
         streamers_dict = dados["lives"]["streamers"].get(server_id_str, {})
         status_server = dados["lives"]["status"].setdefault(server_id_str, {})
-        # Twitch
         if plataformas.get("twitch"):
             twitch_users = [data.get("twitch") for data in streamers_dict.values() if data.get("twitch")]
             lives = await check_twitch_lives(twitch_users)
@@ -540,7 +537,6 @@ async def live_check_loop():
                                 thumb_url = live_info['thumbnail_url'].replace('{width}', '640').replace('{height}', '360')
                                 embed.set_image(url=thumb_url)
                             await canal.send(content=role_mention, embed=embed)
-        # YouTube
         if plataformas.get("youtube"):
             yt_users = [data.get("youtube") for data in streamers_dict.values() if data.get("youtube")]
             lives = await check_youtube_lives(yt_users)
@@ -564,7 +560,6 @@ async def live_check_loop():
                             embed.add_field(name="Título", value=video['snippet']['title'], inline=False)
                             embed.add_field(name="Link", value=f"https://youtube.com/watch?v={video_id}", inline=False)
                             await canal.send(content=role_mention, embed=embed)
-        # TikTok
         if plataformas.get("tiktok"):
             tiktok_users = [data.get("tiktok") for data in streamers_dict.values() if data.get("tiktok")]
             lives = await check_tiktok_lives(tiktok_users)
@@ -590,7 +585,6 @@ async def live_check_loop():
                             view = View(timeout=None)
                             view.add_item(Button(label="Assistir Agora", style=discord.ButtonStyle.link, url=live_info.get("url")))
                             await canal.send(content=role_mention, embed=embed, view=view)
-        # Kick (placeholder, sem API pública)
         for uid, data in streamers_dict.items():
             if data.get("kick"):
                 status_server.setdefault(uid, {})["kick"] = False
@@ -1446,24 +1440,26 @@ async def on_ready():
                 color=0x2c2f33
             )
             await canal_criar.send(embed=embed_criar, view=BotaoCriarCanalView())
-        # Painel SET
+
+        # Painel de Registro (antigo SET)
         canal_set = guild.get_channel(CANAL_SOLICITAR_SET_ID)
         if canal_set:
             async for msg in canal_set.history(limit=5):
                 if msg.author == bot.user:
                     await msg.delete()
             embed_set = discord.Embed(
-                title="📋 SOLICITAR SET",
-                description="Clique no botão abaixo para solicitar seu SET.",
+                title="📋 REGISTRO",
+                description="Clique no botão abaixo para fazer seu registro.",
                 color=0x2c2f33
             )
             view = View(timeout=None)
-            button = Button(label="📝 Solicitar SET", style=discord.ButtonStyle.success, emoji="📝")
+            button = Button(label="📝 Registro", style=discord.ButtonStyle.success, emoji="📝")
             async def button_callback(interaction):
                 await interaction.response.send_modal(SolicitarSetModal())
             button.callback = button_callback
             view.add_item(button)
             await canal_set.send(embed=embed_set, view=view)
+
         # Painel Pedidos
         categoria_pedidos = guild.get_channel(CATEGORIA_PEDIDOS_ID)
         if categoria_pedidos:
@@ -1479,6 +1475,7 @@ async def on_ready():
                 color=0x2c2f33
             )
             await canal_pedidos.send(embed=embed_pedidos, view=PedidoView())
+
         # Botão remover membro no canal criar-canal
         if categoria_painel:
             canal_criar = discord.utils.get(categoria_painel.channels, name="criar-canal")
@@ -1505,7 +1502,7 @@ async def on_ready():
                     )
                     await canal_criar.send(embed=embed_remove, view=view_remove)
 
-        # NOVO: Painel de Lives
+        # Painel de Lives
         canal_lives = guild.get_channel(CANAL_LIVES_PAINEL_ID)
         if canal_lives:
             async for msg in canal_lives.history(limit=5):
@@ -1515,7 +1512,7 @@ async def on_ready():
             embed_lives = await view_lives.build_embed()
             await canal_lives.send(embed=embed_lives, view=view_lives)
 
-        # NOVO: Painel de Compra e Venda
+        # Painel de Compra e Venda
         canal_compra_venda = guild.get_channel(CANAL_COMPRA_VENDA_ID)
         if canal_compra_venda:
             async for msg in canal_compra_venda.history(limit=5):
@@ -1530,7 +1527,7 @@ async def on_ready():
 
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, SET, Pedidos, Lives, Compra/Venda.", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Pedidos, Lives, Compra/Venda.", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

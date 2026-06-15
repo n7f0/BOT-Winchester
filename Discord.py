@@ -148,7 +148,7 @@ def pode_aprovar_set(member):
 def pode_remover_membro(member):
     return tem_cargo(member, CARGO_REMOVER_MEMBRO_IDS)
 
-# ========= RANKING =========
+# ========= RANKING (apenas produtos de luxo) =========
 async def atualizar_ranking():
     canal = bot.get_channel(CHAT_RANK_ID)
     if not canal:
@@ -492,6 +492,7 @@ class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
         self.canal = canal
 
     async def on_submit(self, interaction: discord.Interaction):
+        # defer imediato para não expirar
         await interaction.response.defer(ephemeral=True, thinking=True)
         produtos = []
         for campo, nome in [(self.relogio, "RELÓGIO DE LUXO"), (self.obra, "OBRA DE ARTE"), (self.bebida, "BEBIDA IMPORTADA"), (self.acoes, "AÇÕES DE EMPRESA"), (self.nft, "CARTEIRA NFT")]:
@@ -510,6 +511,7 @@ class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
             await interaction.followup.send("Slot deve ser um número!", ephemeral=True)
             return
 
+        # Aguarda a print
         await interaction.followup.send("📸 Agora envie a **print da farm** aqui no canal.", ephemeral=True)
         def check(m):
             return m.author == interaction.user and m.channel == self.canal and m.attachments and any(a.content_type and a.content_type.startswith('image/') for a in m.attachments)
@@ -983,11 +985,11 @@ class FarmChannelView(View):
 
     @discord.ui.button(label="📦 Farm Produtos", style=discord.ButtonStyle.secondary, emoji="📦", row=0)
     async def farm_produtos(self, interaction: discord.Interaction, button: Button):
-        # Apenas o dono do canal ou admin pode registrar farm
+        # Verificação mínima (síncrona) - apenas dono ou admin
         if interaction.user.id != self.user_id and not is_admin(interaction.user):
             await interaction.response.send_message("Apenas o dono do canal pode registrar farm!", ephemeral=True)
             return
-        # Envia o modal imediatamente
+        # Envia o modal SEM NENHUM defer
         await interaction.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel))
 
     @discord.ui.button(label="💰 Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0)

@@ -266,7 +266,7 @@ class ConfirmarResetView(View):
         await interaction.response.send_message("Reset cancelado.", ephemeral=True)
         self.stop()
 
-# ========= SISTEMA DE REGISTRO (sem seleção de recrutador e com resposta correta) =========
+# ========= SISTEMA DE REGISTRO (com armazenamento de nome/ID) =========
 class SolicitarSetModal(Modal, title="📋 Registro"):
     id_jogo = TextInput(label="Seu ID", placeholder="Digite seu ID", required=True)
     nome = TextInput(label="Seu nome no jogo", placeholder="Digite seu nome no jogo", required=True)
@@ -294,7 +294,6 @@ class SolicitarSetModal(Modal, title="📋 Registro"):
             embed.set_footer(text=f"ID: {pedido_id}")
             view = AprovarSetView(pedido_id, interaction.user.id)
             await canal_registros.send(embed=embed, view=view)
-        # Usar followup porque já usamos defer
         await interaction.followup.send("✅ Registro enviado! Aguarde a aprovação.", ephemeral=True)
 
 class AprovarSetView(View):
@@ -321,7 +320,6 @@ class AprovarSetView(View):
             await interaction.response.send_message("Cargo Membro não encontrado.", ephemeral=True)
             return
         try:
-            # Alterar apelido
             nome_registro = pedido["solicitante_nome"]
             id_registro = pedido["id_jogo"]
             novo_nick = f"{nome_registro} [{id_registro}]"
@@ -332,6 +330,12 @@ class AprovarSetView(View):
                     pass
             # Conceder cargo
             await membro.add_roles(cargo_membro, reason=f"Registro aprovado por {interaction.user.name}")
+            # Armazenar nome/ID nos dados do usuário para uso futuro (ex: criação de canal)
+            uid_str = str(self.solicitante_id)
+            if uid_str not in dados["usuarios"]:
+                dados["usuarios"][uid_str] = {"farms": [], "pagamentos": [], "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
+            dados["usuarios"][uid_str]["registro_nome"] = nome_registro
+            dados["usuarios"][uid_str]["registro_id"] = id_registro
             pedido["status"] = "aprovado"
             pedido["aprovado_por"] = interaction.user.id
             pedido["cargo_dado"] = CARGO_MEMBRO_ID
@@ -377,7 +381,7 @@ class AprovarSetView(View):
         await interaction.message.edit(embed=embed, view=None)
         await interaction.response.send_message("Registro recusado!", ephemeral=True)
 
-# ========= SISTEMA DE LIVES (mantido igual) =========
+# ========= SISTEMA DE LIVES =========
 def extract_platform_from_url(url: str):
     url = url.strip().lower()
     if "twitch.tv" in url:
@@ -1216,7 +1220,7 @@ class MudarNomeModal(Modal, title="✏️ Mudar Nome do Canal"):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:100]}", ephemeral=True)
 
-# ========= BOTÃO CRIAR CANAL =========
+# ========= BOTÃO CRIAR CANAL (com nome baseado no registro) =========
 class BotaoCriarCanalView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1229,19 +1233,32 @@ class BotaoCriarCanalView(View):
         if not interaction.guild.me.guild_permissions.manage_channels:
             await interaction.followup.send("Bot precisa de permissão de Administrador.", ephemeral=True)
             return
-        if str(interaction.user.id) in dados["canais"]:
-            canal = interaction.guild.get_channel(dados["canais"][str(interaction.user.id)])
+        user_id = str(interaction.user.id)
+        # Verificar se já possui canal
+        if user_id in dados["canais"]:
+            canal = interaction.guild.get_channel(dados["canais"][user_id])
             if canal:
                 await interaction.followup.send(f"Você já possui um canal! Acesse: {canal.mention}", ephemeral=True)
                 return
             else:
-                del dados["canais"][str(interaction.user.id)]
+                del dados["canais"][user_id]
                 salvar_dados()
         try:
             categoria = interaction.guild.get_channel(CATEGORIA_FARMS_ID)
             if not categoria:
                 await interaction.followup.send("Categoria não encontrada!", ephemeral=True)
                 return
+            # Definir nome do canal baseado no registro (se existir)
+            user_data = dados["usuarios"].get(user_id, {})
+            registro_nome = user_data.get("registro_nome")
+            registro_id = user_data.get("registro_id")
+            if registro_nome and registro_id:
+                # Remove acentos e caracteres especiais, mantém letras, números e hífen
+                nome_base = re.sub(r'[^a-zA-Z0-9-]', '', registro_nome.lower().replace(" ", "-"))
+                nome_canal = f"{nome_base}-{registro_id}"[:90]
+            else:
+                # Fallback: usar nome do usuário
+                nome_canal = f"farm-{interaction.user.name.lower().replace(' ', '-')}"[:90]
             overwrites = {
                 interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True, add_reactions=True, read_message_history=True),
@@ -1250,9 +1267,8 @@ class BotaoCriarCanalView(View):
             cargo_admin = interaction.guild.get_role(CARGO_00_ID)
             if cargo_admin:
                 overwrites[cargo_admin] = discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True, manage_channels=True)
-            nome = f"farm-{interaction.user.name}".lower().replace(" ", "-")[:90]
-            canal = await categoria.create_text_channel(nome, overwrites=overwrites)
-            dados["canais"][str(interaction.user.id)] = canal.id
+            canal = await categoria.create_text_channel(nome_canal, overwrites=overwrites)
+            dados["canais"][user_id] = canal.id
             salvar_dados()
             view = FarmChannelView(interaction.user.id, interaction.user.name, canal.id)
             embed = discord.Embed(
@@ -1381,6 +1397,7 @@ class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens"):
             await interaction.response.send_message("Valores inválidos.", ephemeral=True)
 
 # ========= REMOÇÃO DE MEMBRO =========
+# (Não usado, removido do painel, mas mantido para compatibilidade)
 class RemoverUsuarioModal(Modal, title="🗑️ Remover Usuário"):
     user_id = TextInput(label="ID do usuário", required=True)
     async def on_submit(self, interaction: discord.Interaction):
@@ -1425,7 +1442,7 @@ async def on_ready():
     live_check_loop.start()
 
     for guild in bot.guilds:
-        # Painel criar canal
+        # Painel criar canal (apenas o botão de criar, sem remover membro)
         categoria_painel = guild.get_channel(CATEGORIA_PAINEL_ID)
         if categoria_painel:
             canal_criar = discord.utils.get(categoria_painel.channels, name="criar-canal")
@@ -1475,32 +1492,6 @@ async def on_ready():
                 color=0x2c2f33
             )
             await canal_pedidos.send(embed=embed_pedidos, view=PedidoView())
-
-        # Botão remover membro no canal criar-canal
-        if categoria_painel:
-            canal_criar = discord.utils.get(categoria_painel.channels, name="criar-canal")
-            if canal_criar:
-                found = False
-                async for msg in canal_criar.history(limit=10):
-                    if msg.author == bot.user and "Remover Membro" in (msg.content or ""):
-                        found = True
-                        break
-                if not found:
-                    view_remove = View(timeout=None)
-                    remove_button = Button(label="🗑️ Remover Membro", style=discord.ButtonStyle.danger, emoji="🗑️")
-                    async def remove_callback(interaction):
-                        if not pode_remover_membro(interaction.user):
-                            await interaction.response.send_message("Você não tem permissão para remover membros.", ephemeral=True)
-                            return
-                        await interaction.response.send_modal(RemoverUsuarioModal())
-                    remove_button.callback = remove_callback
-                    view_remove.add_item(remove_button)
-                    embed_remove = discord.Embed(
-                        title="🗑️ REMOVER MEMBRO",
-                        description="Remova um membro do sistema (limpa registros e deleta canal).\n\n**Permissões:** Cargos 00,01,02 e Gerente.",
-                        color=0x4f545c
-                    )
-                    await canal_criar.send(embed=embed_remove, view=view_remove)
 
         # Painel de Lives
         canal_lives = guild.get_channel(CANAL_LIVES_PAINEL_ID)

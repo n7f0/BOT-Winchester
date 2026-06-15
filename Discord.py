@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.ui import Button, View, Modal, TextInput, UserSelect, Select
 import asyncio
 from datetime import datetime
@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import re
+import aiohttp
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
@@ -32,8 +33,18 @@ CHAT_RANK_ID = 1515877095685750894
 LOG_REGISTROS_ID = int(os.getenv("LOG_REGISTROS_ID", "1498349960062570740"))
 CHAT_PEDIDOS_LOG_ID = int(os.getenv("CHAT_PEDIDOS_LOG_ID", "0"))
 
+# NOVOS CANAIS
+CANAL_LIVES_PAINEL_ID = 1515937074359046235
+CANAL_COMPRA_VENDA_ID = 1515937419395072030
+CANAL_COMPRA_VENDA_LOGS_ID = 1515937452802572318
+
 CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
 CARGO_REMOVER_MEMBRO_IDS = CARGO_ADMIN_IDS
+
+# Configurações de APIs (opcional, via env)
+TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
+TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 dados = {
     "usuarios": {},
@@ -44,7 +55,14 @@ dados = {
     "pedidos": {
         "config": {"porcentagens": {"cliente": 50, "maquina": 40, "fac": 5, "membros": 5}, "ultima_edicao": None},
         "lista": []
-    }
+    },
+    "lives": {
+        "config": {},
+        "streamers": {},
+        "last_notified": {},
+        "status": {}
+    },
+    "compras_vendas": []
 }
 
 def salvar_dados():
@@ -58,12 +76,16 @@ def carregar_dados():
             dados.update(loaded)
             if "pedidos" not in dados:
                 dados["pedidos"] = {"config": {"porcentagens": {"cliente": 50, "maquina": 40, "fac": 5, "membros": 5}, "ultima_edicao": None}, "lista": []}
+            if "lives" not in dados:
+                dados["lives"] = {"config": {}, "streamers": {}, "last_notified": {}, "status": {}}
+            if "compras_vendas" not in dados:
+                dados["compras_vendas"] = []
         return True
     except:
         return False
 
+# ========= LOGS BONITOS =========
 async def log_embed(titulo, descricao, cor, thumbnail=None, fields=None):
-    """Função para enviar embeds bonitos para o canal de logs"""
     canal_logs = bot.get_channel(CHAT_LOGS_ID)
     if canal_logs:
         embed = discord.Embed(title=titulo, description=descricao, color=cor, timestamp=datetime.now())
@@ -85,6 +107,15 @@ async def log_admin_embed(titulo, descricao, cor, thumbnail=None, fields=None):
                 embed.add_field(name=name, value=value, inline=inline)
         await canal.send(embed=embed)
 
+async def log_compra_venda(tipo, dados_log):
+    canal = bot.get_channel(CANAL_COMPRA_VENDA_LOGS_ID)
+    if canal:
+        embed = discord.Embed(title=f"📋 {tipo.upper()}", color=0x2c2f33, timestamp=datetime.now())
+        for chave, valor in dados_log.items():
+            embed.add_field(name=chave, value=valor, inline=False)
+        await canal.send(embed=embed)
+
+# ========= LIMPEZA =========
 async def limpar_logs_usuario(user_id, user_name):
     if str(user_id) in dados["usuarios_banidos"]:
         return 0
@@ -169,14 +200,13 @@ async def atualizar_ranking():
             continue
         try:
             user = await bot.fetch_user(int(uid))
-            tot_relogio = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "RELÓGIO DE LUXO")
-            tot_obra = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "OBRA DE ARTE")
-            tot_bebida = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "BEBIDA IMPORTADA")
-            tot_acoes = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "AÇÕES DE EMPRESA")
-            tot_nft = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if isinstance(p, dict) and p.get("produto") == "CARTEIRA NFT")
+            tot_relogio = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if p.get("produto") == "RELÓGIO DE LUXO")
+            tot_obra = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if p.get("produto") == "OBRA DE ARTE")
+            tot_bebida = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if p.get("produto") == "BEBIDA IMPORTADA")
+            tot_acoes = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if p.get("produto") == "AÇÕES DE EMPRESA")
+            tot_nft = sum(p.get("quantidade", 0) for f in data.get("farms", []) for p in f.get("produtos", []) if p.get("produto") == "CARTEIRA NFT")
             usuarios_data.append({
                 "nome": user.name,
-                "user_id": uid,
                 "total_relogio": tot_relogio,
                 "total_obra": tot_obra,
                 "total_bebida": tot_bebida,
@@ -192,8 +222,8 @@ async def atualizar_ranking():
         for i, u in enumerate(lista, 1):
             if u[key] == 0:
                 continue
-            emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}°"
-            txt += f"{emoji} **{u['nome']}** - {u[key]:,} itens\n"
+            emoji_rank = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}°"
+            txt += f"{emoji_rank} **{u['nome']}** - {u[key]:,} itens\n"
         emb.add_field(name=nome, value=txt or "Nenhum dado ainda", inline=False)
     await canal.send(embed=emb, view=RankingView())
 
@@ -373,7 +403,530 @@ class EscolherCargoView(View):
         except Exception as e:
             await interaction.response.send_message(f"Erro ao atribuir cargo: {e}", ephemeral=True)
 
-# ========= RESTAURAÇÃO =========
+# ========= SISTEMA DE LIVES =========
+def extract_platform_from_url(url: str):
+    url = url.strip().lower()
+    if "twitch.tv" in url:
+        match = re.search(r"twitch\.tv/([a-zA-Z0-9_]+)", url)
+        if match: return ("twitch", match.group(1))
+    elif "youtube.com" in url or "youtu.be" in url:
+        if "youtube.com/@" in url: return ("youtube", url.split("@")[-1].split("/")[0])
+        elif "youtube.com/channel/" in url: return ("youtube", url.split("/channel/")[-1].split("?")[0])
+        elif "youtube.com/c/" in url: return ("youtube", url.split("/c/")[-1].split("/")[0])
+    elif "kick.com" in url:
+        match = re.search(r"kick\.com/([a-zA-Z0-9_]+)", url)
+        if match: return ("kick", match.group(1))
+    elif "tiktok.com" in url:
+        match = re.search(r"tiktok\.com/@([a-zA-Z0-9_.]+)", url)
+        if match: return ("tiktok", match.group(1))
+    return (None, None)
+
+twitch_token = None
+twitch_token_expiry = 0
+
+async def get_twitch_token():
+    global twitch_token, twitch_token_expiry
+    if twitch_token and datetime.utcnow().timestamp() < twitch_token_expiry:
+        return twitch_token
+    if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET:
+        return None
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://id.twitch.tv/oauth2/token", params={"client_id": TWITCH_CLIENT_ID, "client_secret": TWITCH_CLIENT_SECRET, "grant_type": "client_credentials"}) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                twitch_token = data["access_token"]
+                twitch_token_expiry = datetime.utcnow().timestamp() + data["expires_in"] - 60
+                return twitch_token
+    return None
+
+async def check_twitch_lives(streamers):
+    token = await get_twitch_token()
+    if not token:
+        return {}
+    usernames = [s for s in streamers if s]
+    if not usernames:
+        return {}
+    headers = {"Client-ID": TWITCH_CLIENT_ID, "Authorization": f"Bearer {token}"}
+    url = "https://api.twitch.tv/helix/streams?user_login=" + "&user_login=".join(usernames)
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return {s["user_login"].lower(): s for s in data.get("data", [])}
+    return {}
+
+async def check_youtube_lives(streamers):
+    if not YOUTUBE_API_KEY:
+        return {}
+    live_data = {}
+    for ch_id in streamers:
+        if not ch_id:
+            continue
+        url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&channelId={ch_id}&eventType=live&type=video&key={YOUTUBE_API_KEY}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for item in data.get("items", []):
+                        live_data[ch_id] = item
+    return live_data
+
+async def check_tiktok_live(username):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"}
+        async with aiohttp.ClientSession() as session:
+            url = f"https://www.tiktok.com/@{username}/live"
+            async with session.get(url, headers=headers, allow_redirects=True) as resp:
+                if resp.status != 200:
+                    return None
+                html = await resp.text()
+                title_match = re.search(r'"title":"(.*?)"', html)
+                if not title_match:
+                    return None
+                title = title_match.group(1).replace('\\u002F', '/').replace('\\u0026', '&')
+                thumb_match = re.search(r'"thumbnail_url":"(.*?)"', html)
+                thumbnail = thumb_match.group(1).replace('\\u002F', '/') if thumb_match else None
+                return {"title": title, "thumbnail": thumbnail, "url": url}
+    except:
+        return None
+
+async def check_tiktok_lives(streamers):
+    live_data = {}
+    for username in streamers:
+        if not username:
+            continue
+        info = await check_tiktok_live(username)
+        if info:
+            live_data[username] = info
+    return live_data
+
+@tasks.loop(minutes=1)
+async def live_check_loop():
+    for server_id_str in dados["lives"]["config"]:
+        config = dados["lives"]["config"][server_id_str]
+        guild = bot.get_guild(int(server_id_str))
+        if not guild:
+            continue
+        plataformas = config.get("platforms", {"twitch": True, "youtube": True, "kick": True, "tiktok": True})
+        canal_id = config.get("channel")
+        canal = bot.get_channel(canal_id) if canal_id else None
+        role_id = config.get("role")
+        role_mention = f"<@&{role_id}>" if role_id else ""
+        streamers_dict = dados["lives"]["streamers"].get(server_id_str, {})
+        status_server = dados["lives"]["status"].setdefault(server_id_str, {})
+        # Twitch
+        if plataformas.get("twitch"):
+            twitch_users = [data.get("twitch") for data in streamers_dict.values() if data.get("twitch")]
+            lives = await check_twitch_lives(twitch_users)
+            for uid, data in streamers_dict.items():
+                twitch_name = data.get("twitch")
+                status_server.setdefault(uid, {})["twitch"] = twitch_name.lower() in lives if twitch_name else False
+                if twitch_name and twitch_name.lower() in lives:
+                    last_key = f"twitch_{uid}"
+                    live_info = lives[twitch_name.lower()]
+                    last = dados["lives"]["last_notified"].get(last_key)
+                    if last != live_info["id"]:
+                        dados["lives"]["last_notified"][last_key] = live_info["id"]
+                        nome_streamer = data.get("nome", twitch_name)
+                        observacao = data.get("observacao", "")
+                        if canal:
+                            desc = f"**{nome_streamer}** está ao vivo!"
+                            if observacao:
+                                desc += f"\n{observacao}"
+                            embed = discord.Embed(title="🔴 LIVE NA TWITCH", description=desc, color=0x9146ff)
+                            embed.add_field(name="Título", value=live_info['title'], inline=False)
+                            embed.add_field(name="Link", value=f"https://twitch.tv/{twitch_name}", inline=False)
+                            if 'thumbnail_url' in live_info:
+                                thumb_url = live_info['thumbnail_url'].replace('{width}', '640').replace('{height}', '360')
+                                embed.set_image(url=thumb_url)
+                            await canal.send(content=role_mention, embed=embed)
+        # YouTube
+        if plataformas.get("youtube"):
+            yt_users = [data.get("youtube") for data in streamers_dict.values() if data.get("youtube")]
+            lives = await check_youtube_lives(yt_users)
+            for uid, data in streamers_dict.items():
+                yt_ch = data.get("youtube")
+                status_server.setdefault(uid, {})["youtube"] = yt_ch in lives if yt_ch else False
+                if yt_ch and yt_ch in lives:
+                    last_key = f"yt_{uid}"
+                    video = lives[yt_ch]
+                    video_id = video["id"]["videoId"]
+                    last = dados["lives"]["last_notified"].get(last_key)
+                    if last != video_id:
+                        dados["lives"]["last_notified"][last_key] = video_id
+                        nome_streamer = data.get("nome", yt_ch)
+                        observacao = data.get("observacao", "")
+                        if canal:
+                            desc = f"**{nome_streamer}** está ao vivo!"
+                            if observacao:
+                                desc += f"\n{observacao}"
+                            embed = discord.Embed(title="🔴 LIVE NO YOUTUBE", description=desc, color=0xff0000)
+                            embed.add_field(name="Título", value=video['snippet']['title'], inline=False)
+                            embed.add_field(name="Link", value=f"https://youtube.com/watch?v={video_id}", inline=False)
+                            await canal.send(content=role_mention, embed=embed)
+        # TikTok
+        if plataformas.get("tiktok"):
+            tiktok_users = [data.get("tiktok") for data in streamers_dict.values() if data.get("tiktok")]
+            lives = await check_tiktok_lives(tiktok_users)
+            for uid, data in streamers_dict.items():
+                tiktok_name = data.get("tiktok")
+                status_server.setdefault(uid, {})["tiktok"] = tiktok_name in lives if tiktok_name else False
+                if tiktok_name and tiktok_name in lives:
+                    last_key = f"tiktok_{uid}"
+                    live_info = lives[tiktok_name]
+                    last = dados["lives"]["last_notified"].get(last_key)
+                    if last != live_info.get("url"):
+                        dados["lives"]["last_notified"][last_key] = live_info.get("url")
+                        nome_streamer = data.get("nome", tiktok_name)
+                        observacao = data.get("observacao", "")
+                        if canal:
+                            desc = f"**{nome_streamer}** está ao vivo no TikTok!"
+                            if observacao:
+                                desc += f"\n{observacao}"
+                            embed = discord.Embed(title="🔴 LIVE NO TIKTOK", description=desc, color=0xff0050, url=live_info.get("url"))
+                            embed.add_field(name="Título", value=live_info.get("title", "Live"), inline=False)
+                            if live_info.get("thumbnail"):
+                                embed.set_image(url=live_info["thumbnail"])
+                            view = View(timeout=None)
+                            view.add_item(Button(label="Assistir Agora", style=discord.ButtonStyle.link, url=live_info.get("url")))
+                            await canal.send(content=role_mention, embed=embed, view=view)
+        # Kick (placeholder, sem API pública)
+        for uid, data in streamers_dict.items():
+            if data.get("kick"):
+                status_server.setdefault(uid, {})["kick"] = False
+    salvar_dados()
+
+@live_check_loop.before_loop
+async def before_live_check():
+    await bot.wait_until_ready()
+
+class LiveConfigView(View):
+    def __init__(self, server_id):
+        super().__init__(timeout=None)
+        self.server_id = server_id
+
+    async def get_config(self):
+        return dados["lives"]["config"].setdefault(str(self.server_id), {"channel": None, "role": None, "platforms": {"twitch": True, "youtube": True, "kick": True, "tiktok": True}})
+
+    async def build_embed(self):
+        config = await self.get_config()
+        canal_info = f"<#{config['channel']}>" if config['channel'] else "Não definido"
+        cargo_info = f"<@&{config['role']}>" if config['role'] else "Não definido"
+        plats = config['platforms']
+        embed = discord.Embed(title="🔔 NOTIFICAÇÃO DE LIVES", color=0x99aab5)
+        embed.add_field(name="📢 Canal", value=canal_info, inline=False)
+        embed.add_field(name="👥 Cargo (ping)", value=cargo_info, inline=False)
+        status = "\n".join([f"Twitch: {'✅ Ativado' if plats['twitch'] else '❌ Desativado'}",
+                           f"YouTube: {'✅ Ativado' if plats['youtube'] else '❌ Desativado'}",
+                           f"Kick: {'✅ Ativado' if plats['kick'] else '❌ Desativado'}",
+                           f"TikTok: {'✅ Ativado' if plats['tiktok'] else '❌ Desativado'}"])
+        embed.add_field(name="🎮 Plataformas Monitoradas", value=status, inline=False)
+        streamers = dados["lives"]["streamers"].get(str(self.server_id), {})
+        if streamers:
+            lista_streamers = ""
+            for uid, data in streamers.items():
+                nome = data.get("nome", uid)
+                plats_list = []
+                for p in ["twitch", "youtube", "kick", "tiktok"]:
+                    if data.get(p):
+                        online = dados["lives"]["status"].get(str(self.server_id), {}).get(uid, {}).get(p, False)
+                        emoji = "🟢" if online else "🔴"
+                        plats_list.append(f"{emoji} {p.capitalize()}: {data[p]}")
+                if plats_list:
+                    lista_streamers += f"**<@{uid}>**\n" + "\n".join(plats_list) + "\n\n"
+            if lista_streamers:
+                embed.add_field(name="📋 Streamers Cadastrados", value=lista_streamers[:1024], inline=False)
+        return embed
+
+    @discord.ui.button(label="📝 Definir Canal", style=discord.ButtonStyle.secondary, emoji="📝")
+    async def set_channel(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Sem permissão.", ephemeral=True)
+            return
+        modal = SetCanalModal(self.server_id, self)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="⚙️ Configuração", style=discord.ButtonStyle.secondary, emoji="⚙️")
+    async def configuracao(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Sem permissão.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        view = ConfigStreamersView(self.server_id, self)
+        embed = discord.Embed(title="⚙️ CONFIGURAÇÃO DE STREAMERS", description="Gerencie os streamers e plataformas.", color=0x7289da)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="➕ Adicionar Streamer", style=discord.ButtonStyle.success, emoji="➕", row=1)
+    async def adicionar(self, interaction: discord.Interaction, button: Button):
+        if not (is_admin(interaction.user) or is_membro(interaction.user)):
+            await interaction.response.send_message("Você não tem permissão para adicionar streamer.", ephemeral=True)
+            return
+        await interaction.response.send_modal(AddStreamerByLinkModal(self.server_id, self))
+
+    @discord.ui.button(label="🔄 Atualizar Painel", style=discord.ButtonStyle.secondary, emoji="🔄", row=1)
+    async def atualizar_painel(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Sem permissão.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        embed = await self.build_embed()
+        await interaction.message.edit(embed=embed, view=self)
+
+class SetCanalModal(Modal, title="Definir Canal e Cargo"):
+    canal_id = TextInput(label="ID do canal de notícias", required=True)
+    cargo_id = TextInput(label="ID do cargo para mencionar", required=True)
+    def __init__(self, server_id, parent_view):
+        super().__init__()
+        self.server_id = server_id
+        self.parent_view = parent_view
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            cid = int(self.canal_id.value.strip())
+            rid = int(self.cargo_id.value.strip())
+            config = dados["lives"]["config"].setdefault(str(self.server_id), {"platforms": {"twitch": True, "youtube": True, "kick": True, "tiktok": True}})
+            config["channel"] = cid
+            config["role"] = rid
+            salvar_dados()
+            embed = await self.parent_view.build_embed()
+            await interaction.message.edit(embed=embed, view=self.parent_view)
+            await interaction.followup.send("✅ Canal e cargo definidos! Painel atualizado.", ephemeral=True)
+        except:
+            await interaction.followup.send("IDs inválidos.", ephemeral=True)
+
+class ConfigStreamersView(View):
+    def __init__(self, server_id, parent_view):
+        super().__init__(timeout=None)
+        self.server_id = server_id
+        self.parent_view = parent_view
+    @discord.ui.button(label="➕ Adicionar Streamer", style=discord.ButtonStyle.success, emoji="➕")
+    async def add(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(AddStreamerByLinkModal(self.server_id, self.parent_view))
+    @discord.ui.button(label="🗑️ Remover Streamer", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def remove(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        streamers = dados["lives"]["streamers"].get(str(self.server_id), {})
+        if not streamers:
+            await interaction.followup.send("Nenhum streamer cadastrado.", ephemeral=True)
+            return
+        view = RemoveStreamerSelectView(self.server_id, self.parent_view)
+        await interaction.followup.send("Selecione o streamer para remover:", view=view, ephemeral=True)
+    @discord.ui.button(label="📺 Twitch", style=discord.ButtonStyle.secondary, emoji="📺", row=1)
+    async def toggle_twitch(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        config = dados["lives"]["config"].setdefault(str(self.server_id), {"platforms": {"twitch": True}})
+        config["platforms"]["twitch"] = not config["platforms"].get("twitch", True)
+        salvar_dados()
+        await interaction.followup.send(f"Twitch {'ativado' if config['platforms']['twitch'] else 'desativado'}.", ephemeral=True)
+    @discord.ui.button(label="▶️ YouTube", style=discord.ButtonStyle.danger, emoji="▶️", row=1)
+    async def toggle_youtube(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        config = dados["lives"]["config"].setdefault(str(self.server_id), {"platforms": {"youtube": True}})
+        config["platforms"]["youtube"] = not config["platforms"].get("youtube", True)
+        salvar_dados()
+        await interaction.followup.send(f"YouTube {'ativado' if config['platforms']['youtube'] else 'desativado'}.", ephemeral=True)
+    @discord.ui.button(label="🟢 Kick", style=discord.ButtonStyle.success, emoji="🟢", row=1)
+    async def toggle_kick(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        config = dados["lives"]["config"].setdefault(str(self.server_id), {"platforms": {"kick": True}})
+        config["platforms"]["kick"] = not config["platforms"].get("kick", True)
+        salvar_dados()
+        await interaction.followup.send(f"Kick {'ativado' if config['platforms']['kick'] else 'desativado'}.", ephemeral=True)
+    @discord.ui.button(label="🎵 TikTok", style=discord.ButtonStyle.secondary, emoji="🎵", row=1)
+    async def toggle_tiktok(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        config = dados["lives"]["config"].setdefault(str(self.server_id), {"platforms": {"tiktok": True}})
+        config["platforms"]["tiktok"] = not config["platforms"].get("tiktok", True)
+        salvar_dados()
+        await interaction.followup.send(f"TikTok {'ativado' if config['platforms']['tiktok'] else 'desativado'}.", ephemeral=True)
+    @discord.ui.button(label="↩️ Voltar", style=discord.ButtonStyle.secondary, emoji="↩️", row=2)
+    async def voltar(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        embed = await self.parent_view.build_embed()
+        await interaction.followup.send(embed=embed, view=self.parent_view, ephemeral=True)
+
+class RemoveStreamerSelectView(View):
+    def __init__(self, server_id, parent_view):
+        super().__init__(timeout=120)
+        self.server_id = server_id
+        self.parent_view = parent_view
+        streamers = dados["lives"]["streamers"].get(str(server_id), {})
+        options = []
+        for uid, data in streamers.items():
+            nome = data.get("nome", uid)
+            plats = []
+            for p in ["twitch", "youtube", "kick", "tiktok"]:
+                if data.get(p):
+                    plats.append(p.capitalize())
+            desc = f"{nome} ({', '.join(plats)})" if plats else nome
+            options.append(discord.SelectOption(label=desc[:100], value=uid))
+        if options:
+            self.add_item(StreamerRemoveDropdown(options, server_id, parent_view))
+
+class StreamerRemoveDropdown(Select):
+    def __init__(self, options, server_id, parent_view):
+        super().__init__(placeholder="Escolha um streamer para remover...", options=options)
+        self.server_id = server_id
+        self.parent_view = parent_view
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        uid = self.values[0]
+        if str(self.server_id) in dados["lives"]["streamers"] and uid in dados["lives"]["streamers"][str(self.server_id)]:
+            nome = dados["lives"]["streamers"][str(self.server_id)][uid].get("nome", uid)
+            del dados["lives"]["streamers"][str(self.server_id)][uid]
+            salvar_dados()
+            await interaction.followup.send(f"Streamer **{nome}** removido com sucesso!", ephemeral=True)
+            try:
+                embed = await self.parent_view.build_embed()
+                await interaction.message.edit(embed=embed, view=self.parent_view)
+            except:
+                pass
+        else:
+            await interaction.followup.send("Streamer não encontrado.", ephemeral=True)
+
+class AddStreamerByLinkModal(Modal, title="Adicionar Streamer"):
+    plataforma = TextInput(label="PLATAFORMA (twitch/youtube/kick/tiktok)", placeholder="Ex: twitch", required=True)
+    username = TextInput(label="USERNAME DO STREAMER", placeholder="Ex: alanzoka", required=True)
+    discord_user = TextInput(label="DISCORD DO STREAMER (opcional)", placeholder="ID ou @ do usuário", required=False)
+    observacao = TextInput(label="OBSERVAÇÃO (mensagem padrão)", placeholder="Aparecerá na notificação da live", required=False)
+    def __init__(self, server_id, parent_view):
+        super().__init__()
+        self.server_id = server_id
+        self.parent_view = parent_view
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        plat_input = self.plataforma.value.strip().lower()
+        username_input = self.username.value.strip()
+        obs = self.observacao.value.strip()
+        extracted_plat, extracted_id = extract_platform_from_url(username_input)
+        if extracted_plat and extracted_id:
+            platform = extracted_plat
+            identifier = extracted_id
+            nome_streamer = identifier
+        else:
+            if plat_input not in ["twitch", "youtube", "kick", "tiktok"]:
+                await interaction.followup.send("Plataforma inválida.", ephemeral=True)
+                return
+            platform = plat_input
+            identifier = username_input
+            nome_streamer = identifier
+        uid = str(interaction.user.id)
+        if self.discord_user.value.strip():
+            try:
+                uid_str = self.discord_user.value.strip().replace("<@!", "").replace("<@", "").replace(">", "")
+                uid = str(int(uid_str))
+                member = interaction.guild.get_member(int(uid))
+                if member:
+                    nome_streamer = member.display_name
+            except:
+                pass
+        if is_membro(interaction.user) and not is_admin(interaction.user):
+            if uid != str(interaction.user.id):
+                await interaction.followup.send("Você só pode adicionar seu próprio canal.", ephemeral=True)
+                return
+        if str(self.server_id) not in dados["lives"]["streamers"]:
+            dados["lives"]["streamers"][str(self.server_id)] = {}
+        if uid not in dados["lives"]["streamers"][str(self.server_id)]:
+            dados["lives"]["streamers"][str(self.server_id)][uid] = {"nome": nome_streamer, "twitch": None, "youtube": None, "kick": None, "tiktok": None, "observacao": ""}
+        dados["lives"]["streamers"][str(self.server_id)][uid][platform] = identifier
+        dados["lives"]["streamers"][str(self.server_id)][uid]["nome"] = nome_streamer
+        if obs:
+            dados["lives"]["streamers"][str(self.server_id)][uid]["observacao"] = obs
+        salvar_dados()
+        await interaction.followup.send(f"Streamer **{nome_streamer}** adicionado em **{platform}**!", ephemeral=True)
+        try:
+            embed = await self.parent_view.build_embed()
+            await interaction.message.edit(embed=embed, view=self.parent_view)
+        except:
+            pass
+
+# ========= SISTEMA DE COMPRA E VENDA =========
+class VendaModal(Modal, title="💸 Venda de Munição"):
+    tipo_municao = TextInput(label="Tipo de Munição (PISTOLA/SUB/RIFLE/FUZIL)", placeholder="Ex: PISTOLA", required=True)
+    quantidade = TextInput(label="Quantidade", placeholder="Ex: 1000", required=True)
+    valor_total = TextInput(label="Valor Total (R$)", placeholder="Ex: 500", required=True)
+    faccao_compradora = TextInput(label="Facção Compradora", placeholder="Ex: Primeiro Comando", required=True)
+    responsavel = TextInput(label="Responsável pela Venda", placeholder="Ex: @usuario ou nome", required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not pode_registrar_acao(interaction.user):
+            await interaction.response.send_message("Você não tem permissão para registrar vendas.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        tipo = self.tipo_municao.value.strip().upper()
+        if tipo not in ["PISTOLA", "SUB", "RIFLE", "FUZIL"]:
+            await interaction.followup.send("Tipo de munição inválido!", ephemeral=True)
+            return
+        try:
+            qtd = int(self.quantidade.value)
+            valor = float(self.valor_total.value.replace(",", "."))
+        except:
+            await interaction.followup.send("Quantidade ou valor inválidos!", ephemeral=True)
+            return
+        faccao = self.faccao_compradora.value.strip()
+        responsavel_nome = self.responsavel.value.strip()
+        await interaction.followup.send("📸 Agora envie a **print do comprovante da venda**.", ephemeral=True)
+        def check(m):
+            return m.author == interaction.user and m.channel == interaction.channel and m.attachments
+        try:
+            msg = await bot.wait_for('message', timeout=60.0, check=check)
+            imagem_url = msg.attachments[0].url
+            await msg.delete()
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Tempo esgotado!", ephemeral=True)
+            return
+        dados_log = {"Tipo": "VENDA", "Munição": tipo, "Quantidade": f"{qtd:,} unidades", "Valor Total": f"R$ {valor:,.2f}", "Facção Compradora": faccao, "Responsável": responsavel_nome, "Registrado por": interaction.user.mention}
+        await log_compra_venda("venda", dados_log)
+        dados["compras_vendas"].append({"tipo": "venda", "municao": tipo, "quantidade": qtd, "valor_total": valor, "faccao_compradora": faccao, "responsavel": responsavel_nome, "registrado_por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "print_url": imagem_url})
+        salvar_dados()
+        await interaction.followup.send(f"✅ Venda de **{qtd:,} {tipo}** para **{faccao}** registrada! Valor: R$ {valor:,.2f}", ephemeral=True)
+        await log_admin_embed("💸 VENDA REGISTRADA", f"Usuário: {interaction.user.mention}\nMunição: {qtd} {tipo}\nValor: R$ {valor:,.2f}\nFacção: {faccao}", 0x2c2f33)
+
+class CompraModal(Modal, title="🛒 Compra de Produto"):
+    quantidade = TextInput(label="Quantidade", placeholder="Ex: 1000", required=True)
+    produto = TextInput(label="Produto", placeholder="Ex: Munição", required=True)
+    valor_total = TextInput(label="Valor Total (R$)", placeholder="Ex: 500", required=True)
+    faccao_vendedora = TextInput(label="Facção Vendedora", placeholder="Ex: Primeiro Comando", required=True)
+    responsavel = TextInput(label="Responsável pela Compra", placeholder="Ex: @usuario ou nome", required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not pode_registrar_acao(interaction.user):
+            await interaction.response.send_message("Você não tem permissão para registrar compras.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            qtd = int(self.quantidade.value)
+            valor = float(self.valor_total.value.replace(",", "."))
+        except:
+            await interaction.followup.send("Quantidade ou valor inválidos!", ephemeral=True)
+            return
+        await interaction.followup.send("📸 Agora envie a **print do comprovante da compra**.", ephemeral=True)
+        def check(m):
+            return m.author == interaction.user and m.channel == interaction.channel and m.attachments
+        try:
+            msg = await bot.wait_for('message', timeout=60.0, check=check)
+            imagem_url = msg.attachments[0].url
+            await msg.delete()
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Tempo esgotado!", ephemeral=True)
+            return
+        await log_compra_venda("compra", {"Tipo": "COMPRA", "Quantidade": f"{qtd:,}", "Produto": self.produto.value, "Valor Total": f"R$ {valor:,.2f}", "Facção Vendedora": self.faccao_vendedora.value, "Responsável": self.responsavel.value, "Registrado por": interaction.user.mention})
+        dados["compras_vendas"].append({"tipo": "compra", "quantidade": qtd, "produto": self.produto.value, "valor_total": valor, "faccao_vendedora": self.faccao_vendedora.value, "responsavel": self.responsavel.value, "registrado_por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "print_url": imagem_url})
+        salvar_dados()
+        await interaction.followup.send("✅ Compra registrada!", ephemeral=True)
+        await log_admin_embed("🛒 COMPRA REGISTRADA", f"Usuário: {interaction.user.mention}\nProduto: {qtd} x {self.produto.value}\nValor: R$ {valor:,.2f}\nFacção: {self.faccao_vendedora.value}", 0x2c2f33)
+
+class CompraVendaView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    @discord.ui.button(label="💸 Venda de Munição", style=discord.ButtonStyle.secondary, emoji="💸")
+    async def venda(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(VendaModal())
+    @discord.ui.button(label="🛒 Compra de Produto", style=discord.ButtonStyle.secondary, emoji="🛒")
+    async def compra(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(CompraModal())
+
+# ========= RESTAURAÇÃO DE CANAIS DE FARM =========
 async def restaurar_canais_farms():
     for user_id_str, canal_id in dados["canais"].items():
         canal = bot.get_channel(canal_id)
@@ -422,13 +975,12 @@ class FarmProdutosModal(Modal, title="📦 Farm Produtos"):
             await interaction.followup.send("Nenhum produto válido!", ephemeral=True)
             return
 
-        # Armazena os produtos temporariamente e pede o slot
         self.produtos = produtos
         await interaction.followup.send("📝 Agora digite o **número do SLOT** no chat.", ephemeral=False)
-        
+
         def check_slot(m):
             return m.author == interaction.user and m.channel == self.canal and m.content.strip().isdigit()
-        
+
         try:
             msg_slot = await bot.wait_for('message', timeout=60.0, check=check_slot)
             slot_num = int(msg_slot.content.strip())
@@ -437,7 +989,6 @@ class FarmProdutosModal(Modal, title="📦 Farm Produtos"):
             await self.canal.send("⏰ Tempo esgotado! Registro cancelado.", delete_after=10)
             return
 
-        # Após receber o slot, pede a print
         await self.canal.send("📸 Agora envie a **print da farm** aqui no canal.")
         def check_print(m):
             return m.author == interaction.user and m.channel == self.canal and m.attachments
@@ -449,7 +1000,6 @@ class FarmProdutosModal(Modal, title="📦 Farm Produtos"):
             await self.canal.send("⏰ Tempo esgotado! Registro cancelado.", delete_after=10)
             return
 
-        # Salva o registro
         if str(self.user_id) not in dados["usuarios"]:
             dados["usuarios"][str(self.user_id)] = {"farms": [], "pagamentos": [], "nome": self.user_name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
 
@@ -620,7 +1170,6 @@ class FarmChannelView(View):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores podem resetar a semana.", ephemeral=True)
             return
-        # Implementação real
         confirm_view = ConfirmResetSemanalView(self.user_id, self.user_name, interaction.channel)
         await interaction.response.send_message("⚠️ **Tem certeza que deseja resetar a semana?** Isso apagará todos os registros de farm, pagamentos e dinheiro sujo deste usuário.", view=confirm_view, ephemeral=True)
 
@@ -879,6 +1428,8 @@ async def on_member_remove(member):
 @bot.event
 async def on_ready():
     print(f"✅ Bot {bot.user} online!")
+    live_check_loop.start()
+
     for guild in bot.guilds:
         # Painel criar canal
         categoria_painel = guild.get_channel(CATEGORIA_PAINEL_ID)
@@ -954,9 +1505,32 @@ async def on_ready():
                     )
                     await canal_criar.send(embed=embed_remove, view=view_remove)
 
+        # NOVO: Painel de Lives
+        canal_lives = guild.get_channel(CANAL_LIVES_PAINEL_ID)
+        if canal_lives:
+            async for msg in canal_lives.history(limit=5):
+                if msg.author == bot.user:
+                    await msg.delete()
+            view_lives = LiveConfigView(guild.id)
+            embed_lives = await view_lives.build_embed()
+            await canal_lives.send(embed=embed_lives, view=view_lives)
+
+        # NOVO: Painel de Compra e Venda
+        canal_compra_venda = guild.get_channel(CANAL_COMPRA_VENDA_ID)
+        if canal_compra_venda:
+            async for msg in canal_compra_venda.history(limit=5):
+                if msg.author == bot.user:
+                    await msg.delete()
+            embed_compra_venda = discord.Embed(
+                title="💸 SISTEMA DE COMPRA E VENDA",
+                description="Clique nos botões abaixo para registrar uma **venda** ou **compra**.\n\n💸 **Venda de Munição** – Registre a venda de munição para outra facção.\n🛒 **Compra de Produto** – Registre a compra de produtos diversos.\n\nTodos os registros são salvos com print e enviados para o canal de logs.",
+                color=0x2c2f33
+            )
+            await canal_compra_venda.send(embed=embed_compra_venda, view=CompraVendaView())
+
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, SET, Pedidos, Lives, Compra/Venda.", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

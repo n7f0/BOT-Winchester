@@ -380,43 +380,24 @@ async def restaurar_canais_farms():
                     view = FarmChannelView(user_id, user.name, canal.id)
                     embed = discord.Embed(
                         title="🔐 SEU CANAL PRIVADO",
-                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 **Farm Produtos** (2 etapas)\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**\n📊 **Fechar Caixa**\n✏️ **Mudar Nome**\n📜 **Histórico Caixa**\n🔄 **Reset Semanal**\n🗑️ **Fechar Canal**",
+                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**\n📊 **Fechar Caixa**\n✏️ **Mudar Nome**\n📜 **Histórico Caixa**\n🔄 **Reset Semanal**\n🗑️ **Fechar Canal**",
                         color=0x2c2f33
                     )
                     await canal.send(embed=embed, view=view)
 
-# ========= MODAIS DE FARM (DOIS MODAIS SEQUENCIAIS) =========
-class FarmProdutosModalSlot(Modal, title="📦 Farm Produtos - Etapa 1/2"):
-    slot = TextInput(label="SLOT (número)", placeholder="Ex: 1, 2, 3...", required=True)
-
-    def __init__(self, user_id, user_name, canal):
-        super().__init__()
-        self.user_id = user_id
-        self.user_name = user_name
-        self.canal = canal
-
-    async def on_submit(self, interaction: discord.Interaction):
-        slot_num = self.slot.value.strip()
-        if not slot_num.isdigit():
-            await interaction.response.send_message("Slot deve ser um número!", ephemeral=True)
-            return
-        # Abre o segundo modal com os produtos
-        modal_produtos = FarmProdutosModalProdutos(self.user_id, self.user_name, self.canal, int(slot_num))
-        await interaction.response.send_modal(modal_produtos)
-
-class FarmProdutosModalProdutos(Modal, title="📦 Farm Produtos - Etapa 2/2"):
+# ========= MODAL DE FARM PRODUTOS (APENAS PRODUTOS) =========
+class FarmProdutosModal(Modal, title="📦 Farm Produtos"):
     relogio = TextInput(label="RELÓGIO DE LUXO - Quantidade", placeholder="Ex: 5", required=False)
     obra = TextInput(label="OBRA DE ARTE - Quantidade", placeholder="Ex: 2", required=False)
     bebida = TextInput(label="BEBIDA IMPORTADA - Quantidade", placeholder="Ex: 10", required=False)
     acoes = TextInput(label="AÇÕES DE EMPRESA - Quantidade", placeholder="Ex: 100", required=False)
     nft = TextInput(label="CARTEIRA NFT - Quantidade", placeholder="Ex: 1", required=False)
 
-    def __init__(self, user_id, user_name, canal, slot_num):
+    def __init__(self, user_id, user_name, canal):
         super().__init__()
         self.user_id = user_id
         self.user_name = user_name
         self.canal = canal
-        self.slot_num = slot_num
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -433,22 +414,38 @@ class FarmProdutosModalProdutos(Modal, title="📦 Farm Produtos - Etapa 2/2"):
             await interaction.followup.send("Nenhum produto válido!", ephemeral=True)
             return
 
-        await interaction.followup.send("📸 Agora envie a **print da farm** aqui no canal.", ephemeral=True)
-        def check(m):
-            return m.author == interaction.user and m.channel == self.canal and m.attachments and any(a.content_type and a.content_type.startswith('image/') for a in m.attachments)
+        # Armazena os produtos temporariamente e pede o slot
+        self.produtos = produtos
+        await interaction.followup.send("📝 Agora digite o **número do SLOT** no chat.", ephemeral=False)
+        
+        def check_slot(m):
+            return m.author == interaction.user and m.channel == self.canal and m.content.strip().isdigit()
+        
         try:
-            msg = await bot.wait_for('message', timeout=60.0, check=check)
+            msg_slot = await bot.wait_for('message', timeout=60.0, check=check_slot)
+            slot_num = int(msg_slot.content.strip())
         except asyncio.TimeoutError:
-            await interaction.followup.send("Tempo esgotado!", ephemeral=True)
+            await self.canal.send("⏰ Tempo esgotado! Registro cancelado.", delete_after=10)
             return
-        imagem_url = msg.attachments[0].url
 
+        # Após receber o slot, pede a print
+        await self.canal.send("📸 Agora envie a **print da farm** aqui no canal.")
+        def check_print(m):
+            return m.author == interaction.user and m.channel == self.canal and m.attachments
+        try:
+            msg_print = await bot.wait_for('message', timeout=60.0, check=check_print)
+            imagem_url = msg_print.attachments[0].url
+        except asyncio.TimeoutError:
+            await self.canal.send("⏰ Tempo esgotado! Registro cancelado.", delete_after=10)
+            return
+
+        # Salva o registro
         if str(self.user_id) not in dados["usuarios"]:
             dados["usuarios"][str(self.user_id)] = {"farms": [], "pagamentos": [], "nome": self.user_name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
 
         registro = {
-            "produtos": produtos,
-            "slot": self.slot_num,
+            "produtos": self.produtos,
+            "slot": slot_num,
             "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "print_url": imagem_url,
             "validado": True,
@@ -457,8 +454,8 @@ class FarmProdutosModalProdutos(Modal, title="📦 Farm Produtos - Etapa 2/2"):
         dados["usuarios"][str(self.user_id)]["farms"].append(registro)
         salvar_dados()
 
-        embed = discord.Embed(title="✅ FARM PRODUTOS REGISTRADA", description=f"**Usuário:** <@{self.user_id}>\n**Slot:** {self.slot_num}\n", color=0x2c2f33)
-        desc = "".join(f"🔹 **{p['produto']}:** {p['quantidade']} itens\n" for p in produtos)
+        embed = discord.Embed(title="✅ FARM PRODUTOS REGISTRADA", description=f"**Usuário:** <@{self.user_id}>\n**Slot:** {slot_num}\n", color=0x2c2f33)
+        desc = "".join(f"🔹 **{p['produto']}:** {p['quantidade']} itens\n" for p in self.produtos)
         embed.description += desc
         embed.add_field(name="📅 Data", value=datetime.now().strftime("%d/%m/%Y às %H:%M"), inline=False)
         embed.add_field(name="📦 Total de farms", value=f"{len(dados['usuarios'][str(self.user_id)]['farms'])} farms", inline=False)
@@ -467,10 +464,8 @@ class FarmProdutosModalProdutos(Modal, title="📦 Farm Produtos - Etapa 2/2"):
         canal_registros = bot.get_channel(LOG_REGISTROS_ID)
         if canal_registros:
             await canal_registros.send(embed=embed)
-        await interaction.followup.send("Farm registrada com sucesso!", ephemeral=True)
-        produtos_str = ', '.join(f"{p['produto']}: {p['quantidade']}" for p in produtos)
-        await log_acao("registrar_farm", interaction.user, f"Produtos: {produtos_str} | Slot: {self.slot_num}")
-        await log_admin("📦 NOVA FARM PRODUTOS", f"Usuário: {interaction.user.mention}\nProdutos: {produtos_str}\nSlot: {self.slot_num}", 0x2c2f33)
+        await log_acao("registrar_farm", interaction.user, f"Produtos: {self.produtos} | Slot: {slot_num}")
+        await log_admin("📦 NOVA FARM PRODUTOS", f"Usuário: {interaction.user.mention}\nProdutos: {self.produtos}\nSlot: {slot_num}", 0x2c2f33)
         await atualizar_ranking()
 
 # ========= MODAL ADMIN DINHEIRO SUJO =========
@@ -496,7 +491,7 @@ class DinheiroSujoAdminModal(Modal, title="💰 Registrar Dinheiro Sujo (Admin)"
 
         await interaction.followup.send("📸 Agora envie a **print do comprovante** aqui no canal.", ephemeral=True)
         def check(m):
-            return m.author == interaction.user and m.channel == self.canal and m.attachments and any(a.content_type and a.content_type.startswith('image/') for a in m.attachments)
+            return m.author == interaction.user and m.channel == self.canal and m.attachments
         try:
             msg = await bot.wait_for('message', timeout=60.0, check=check)
         except asyncio.TimeoutError:
@@ -568,12 +563,10 @@ class FarmChannelView(View):
 
     @discord.ui.button(label="📦 Farm Produtos", style=discord.ButtonStyle.secondary, emoji="📦", row=0)
     async def farm_produtos(self, interaction: discord.Interaction, button: Button):
-        # Apenas o dono do canal ou admin
         if interaction.user.id != self.user_id and not is_admin(interaction.user):
             await interaction.response.send_message("Apenas o dono do canal pode registrar farm!", ephemeral=True)
             return
-        # Abre o primeiro modal (slot)
-        await interaction.response.send_modal(FarmProdutosModalSlot(self.user_id, self.user_name, interaction.channel))
+        await interaction.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel))
 
     @discord.ui.button(label="💰 Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0)
     async def registrar_dinheiro_sujo_admin(self, interaction: discord.Interaction, button: Button):
@@ -611,7 +604,6 @@ class FarmChannelView(View):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores (cargo 00)!", ephemeral=True)
             return
-        # Implementação simplificada
         await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
 # ========= BOTÃO CRIAR CANAL =========
@@ -655,7 +647,7 @@ class BotaoCriarCanalView(View):
             view = FarmChannelView(interaction.user.id, interaction.user.name, canal.id)
             embed = discord.Embed(
                 title="🔐 SEU CANAL PRIVADO",
-                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 **Farm Produtos** (2 etapas)\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**",
+                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**",
                 color=0x2c2f33
             )
             await canal.send(embed=embed, view=view)

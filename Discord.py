@@ -31,7 +31,7 @@ CHAT_LOGS_ID = 1515876949233504267
 CHAT_ADMIN_LOGS_ID = 1515876971089760326
 CHAT_RANK_ID = 1515877095685750894
 LOG_REGISTROS_ID = int(os.getenv("LOG_REGISTROS_ID", "1498349960062570740"))
-CHAT_PEDIDOS_LOG_ID = int(os.getenv("CHAT_PEDIDOS_LOG_ID", "0"))
+CHAT_PEDIDOS_LOG_ID = 1516080167632502794   # NOVO canal de logs de pedidos
 
 CANAL_LIVES_PAINEL_ID = 1515937074359046235
 CANAL_COMPRA_VENDA_ID = 1515937419395072030
@@ -100,6 +100,16 @@ async def log_admin_embed(titulo, descricao, cor, thumbnail=None, fields=None):
         embed = discord.Embed(title=titulo, description=descricao, color=cor, timestamp=datetime.now())
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
+        if fields:
+            for name, value, inline in fields:
+                embed.add_field(name=name, value=value, inline=inline)
+        await canal.send(embed=embed)
+
+async def log_pedido_embed(titulo, descricao, cor, fields=None):
+    """Envia logs do sistema de pedidos para o canal específico"""
+    canal = bot.get_channel(CHAT_PEDIDOS_LOG_ID)
+    if canal:
+        embed = discord.Embed(title=titulo, description=descricao, color=cor, timestamp=datetime.now())
         if fields:
             for name, value, inline in fields:
                 embed.add_field(name=name, value=value, inline=inline)
@@ -274,16 +284,23 @@ class RecrutadorSelectView(View):
     def __init__(self, modal):
         super().__init__(timeout=120)
         self.modal = modal
-        select = UserSelect(placeholder="Escolha o recrutador", min_values=1, max_values=1)
+        # Select apenas para cargos de líder (00,01,02,Gerente)
+        select = UserSelect(placeholder="Escolha o recrutador (apenas líderes)", min_values=1, max_values=1)
         select.callback = self.select_callback
         self.add_item(select)
+
     async def select_callback(self, interaction: discord.Interaction):
-        user = interaction.data["values"][0]
-        recrutador_id = int(user)
-        recrutador = interaction.guild.get_member(recrutador_id)
-        if not recrutador:
-            await interaction.response.send_message("Recrutador não encontrado.", ephemeral=True)
+        # Filtrar apenas membros com os cargos permitidos
+        selected_user_id = int(interaction.data["values"][0])
+        membro = interaction.guild.get_member(selected_user_id)
+        if not membro:
+            await interaction.response.send_message("Usuário não encontrado.", ephemeral=True)
             return
+        if not tem_cargo(membro, CARGO_ADMIN_IDS):
+            await interaction.response.send_message("Este usuário não é um líder (cargos 00,01,02 ou Gerente). Selecione um líder válido.", ephemeral=True)
+            return
+        recrutador_id = selected_user_id
+        recrutador = membro
         pedido_id = str(int(datetime.now().timestamp()))
         dados["sets_pendentes"][pedido_id] = {
             "solicitante_id": interaction.user.id,
@@ -368,19 +385,16 @@ class EscolherCargoView(View):
             await interaction.response.send_message("Cargo não encontrado.", ephemeral=True)
             return
         try:
-            # Obter dados do pedido
             pedido = dados["sets_pendentes"].get(self.pedido_id)
             if pedido:
                 nome_registro = pedido["solicitante_nome"]
                 id_registro = pedido["id_jogo"]
                 novo_nick = f"{nome_registro} [{id_registro}]"
-                # Tentar alterar o nickname
                 if guild.me.guild_permissions.change_nickname and guild.me.guild_permissions.manage_nicknames:
                     try:
                         await membro.edit(nick=novo_nick, reason=f"Registro aprovado: {nome_registro} [{id_registro}]")
                     except:
                         pass
-            # Adicionar cargo
             await membro.add_roles(cargo, reason=f"Registro aprovado por {interaction.user.name}")
             if pedido:
                 pedido["status"] = "aprovado"
@@ -1304,7 +1318,7 @@ class BotaoCriarCanalView(View):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:200]}", ephemeral=True)
 
-# ========= SISTEMA DE PEDIDOS =========
+# ========= SISTEMA DE PEDIDOS COM LOGS =========
 class PedidoView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1361,9 +1375,22 @@ class NovoPedidoModal(Modal, title="📝 Novo Pedido"):
         embed.add_field(name="Prazo", value=pedido["prazo_entrega"], inline=True)
         embed.add_field(name="Descontado", value=descontado, inline=True)
         embed.add_field(name="Distribuição", value=f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({pcts['fac']}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)", inline=False)
-        embed.set_footer(text=f"Pedido #{pedido['id']}")
+        embed.set_footer(text=f"Pedido #{pedido['id']} - Criado por {interaction.user.name}")
         await interaction.followup.send(embed=embed, ephemeral=True)
-        await log_admin_embed("📝 NOVO PEDIDO", f"Cliente: {pedido['cliente']}\nValor: R$ {valor:,.2f}\nPrazo: {pedido['prazo_entrega']}", 0x2c2f33)
+        # Log no canal específico
+        await log_pedido_embed(
+            "📝 NOVO PEDIDO",
+            f"Pedido #{pedido['id']} criado por {interaction.user.mention}",
+            0x2c2f33,
+            fields=[
+                ("Cliente", pedido["cliente"], True),
+                ("Valor Total", f"R$ {valor:,.2f}", True),
+                ("Prazo", pedido["prazo_entrega"], True),
+                ("Descontado", descontado, True),
+                ("Distribuição", f"Cliente: R$ {cliente_part:,.2f}\nMáquina: R$ {maquina_part:,.2f}\nFacção: R$ {fac_part:,.2f}\nMembros: R$ {membros_part:,.2f}", False)
+            ]
+        )
+        await log_admin_embed("📝 NOVO PEDIDO", f"Pedido #{pedido['id']} criado por {interaction.user.mention}", 0x2c2f33)
 
 class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens"):
     cliente = TextInput(label="% Cliente", default="50", required=True)
@@ -1388,6 +1415,18 @@ class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens"):
             dados["pedidos"]["config"]["ultima_edicao"] = {"por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             salvar_dados()
             await interaction.response.send_message("Porcentagens atualizadas!", ephemeral=True)
+            await log_pedido_embed(
+                "⚙️ PORCENTAGENS EDITADAS",
+                f"Porcentagens editadas por {interaction.user.mention}",
+                0x2c2f33,
+                fields=[
+                    ("Cliente", f"{pcts['cliente']}%", True),
+                    ("Máquina", f"{pcts['maquina']}%", True),
+                    ("Facção", f"{pcts['fac']}%", True),
+                    ("Membros", f"{pcts['membros']}%", True),
+                    ("Total", "100%", True)
+                ]
+            )
             await log_admin_embed("⚙️ PORCENTAGENS EDITADAS", f"Novas porcentagens: Cliente {pcts['cliente']}%, Máquina {pcts['maquina']}%, Facção {pcts['fac']}%, Membros {pcts['membros']}%", 0x2c2f33)
         except:
             await interaction.response.send_message("Valores inválidos.", ephemeral=True)

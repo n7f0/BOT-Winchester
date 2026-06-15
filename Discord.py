@@ -266,7 +266,7 @@ class ConfirmarResetView(View):
         await interaction.response.send_message("Reset cancelado.", ephemeral=True)
         self.stop()
 
-# ========= SISTEMA DE REGISTRO (com armazenamento de nome/ID) =========
+# ========= SISTEMA DE REGISTRO =========
 class SolicitarSetModal(Modal, title="📋 Registro"):
     id_jogo = TextInput(label="Seu ID", placeholder="Digite seu ID", required=True)
     nome = TextInput(label="Seu nome no jogo", placeholder="Digite seu nome no jogo", required=True)
@@ -328,9 +328,7 @@ class AprovarSetView(View):
                     await membro.edit(nick=novo_nick, reason=f"Registro aprovado: {nome_registro} [{id_registro}]")
                 except:
                     pass
-            # Conceder cargo
             await membro.add_roles(cargo_membro, reason=f"Registro aprovado por {interaction.user.name}")
-            # Armazenar nome/ID nos dados do usuário para uso futuro (ex: criação de canal)
             uid_str = str(self.solicitante_id)
             if uid_str not in dados["usuarios"]:
                 dados["usuarios"][uid_str] = {"farms": [], "pagamentos": [], "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
@@ -340,12 +338,10 @@ class AprovarSetView(View):
             pedido["aprovado_por"] = interaction.user.id
             pedido["cargo_dado"] = CARGO_MEMBRO_ID
             salvar_dados()
-            # Notificar novo membro
             try:
                 await membro.send(f"✅ Parabéns! Seu registro foi **aprovado** e você recebeu o cargo {cargo_membro.mention}. Seu apelido foi alterado para **{novo_nick}**. Bem-vindo(a)!")
             except:
                 pass
-            # Atualizar embed do canal de registros
             canal_registros = bot.get_channel(CANAL_REGISTROS_SET_ID)
             if canal_registros:
                 embed = discord.Embed(
@@ -914,7 +910,7 @@ async def restaurar_canais_farms():
                 if user:
                     view = FarmChannelView(user_id, user.name, canal.id)
                     embed = discord.Embed(
-                        title="🔐 SEU CANAL PRIVADO",
+                        title="📦 SEU CANAL PRIVADO",
                         description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**\n📊 **Fechar Caixa**\n✏️ **Mudar Nome**\n📜 **Histórico Caixa**\n🔄 **Reset Semanal**\n🗑️ **Fechar Canal**",
                         color=0x2c2f33
                     )
@@ -1220,11 +1216,11 @@ class MudarNomeModal(Modal, title="✏️ Mudar Nome do Canal"):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:100]}", ephemeral=True)
 
-# ========= BOTÃO CRIAR CANAL (com nome baseado no registro) =========
+# ========= BOTÃO CRIAR CANAL (com emoji 📦 e nome baseado no registro) =========
 class BotaoCriarCanalView(View):
     def __init__(self):
         super().__init__(timeout=None)
-    @discord.ui.button(label="🔓 Criar Meu Canal Privado", style=discord.ButtonStyle.success, emoji="🔓")
+    @discord.ui.button(label="📦 Criar Meu Canal Privado", style=discord.ButtonStyle.success, emoji="📦")
     async def criar_canal(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         if interaction.guild is None:
@@ -1234,7 +1230,6 @@ class BotaoCriarCanalView(View):
             await interaction.followup.send("Bot precisa de permissão de Administrador.", ephemeral=True)
             return
         user_id = str(interaction.user.id)
-        # Verificar se já possui canal
         if user_id in dados["canais"]:
             canal = interaction.guild.get_channel(dados["canais"][user_id])
             if canal:
@@ -1248,16 +1243,13 @@ class BotaoCriarCanalView(View):
             if not categoria:
                 await interaction.followup.send("Categoria não encontrada!", ephemeral=True)
                 return
-            # Definir nome do canal baseado no registro (se existir)
             user_data = dados["usuarios"].get(user_id, {})
             registro_nome = user_data.get("registro_nome")
             registro_id = user_data.get("registro_id")
             if registro_nome and registro_id:
-                # Remove acentos e caracteres especiais, mantém letras, números e hífen
                 nome_base = re.sub(r'[^a-zA-Z0-9-]', '', registro_nome.lower().replace(" ", "-"))
                 nome_canal = f"{nome_base}-{registro_id}"[:90]
             else:
-                # Fallback: usar nome do usuário
                 nome_canal = f"farm-{interaction.user.name.lower().replace(' ', '-')}"[:90]
             overwrites = {
                 interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -1272,13 +1264,13 @@ class BotaoCriarCanalView(View):
             salvar_dados()
             view = FarmChannelView(interaction.user.id, interaction.user.name, canal.id)
             embed = discord.Embed(
-                title="🔐 SEU CANAL PRIVADO",
+                title="📦 SEU CANAL PRIVADO",
                 description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**",
                 color=0x2c2f33
             )
             await canal.send(embed=embed, view=view)
-            await log_embed("🔓 CANAL CRIADO", f"{interaction.user.mention} criou seu canal privado: {canal.mention}", 0x2c2f33, thumbnail=interaction.user.display_avatar.url)
-            await log_admin_embed("🔓 CANAL CRIADO", f"Usuário: {interaction.user.mention}\nCanal: {canal.mention}", 0x2c2f33)
+            await log_embed("📦 CANAL CRIADO", f"{interaction.user.mention} criou seu canal privado: {canal.mention}", 0x2c2f33, thumbnail=interaction.user.display_avatar.url)
+            await log_admin_embed("📦 CANAL CRIADO", f"Usuário: {interaction.user.mention}\nCanal: {canal.mention}", 0x2c2f33)
             await interaction.followup.send(f"✅ Canal criado! Acesse: {canal.mention}", ephemeral=True)
             await atualizar_ranking()
         except Exception as e:
@@ -1397,7 +1389,6 @@ class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens"):
             await interaction.response.send_message("Valores inválidos.", ephemeral=True)
 
 # ========= REMOÇÃO DE MEMBRO =========
-# (Não usado, removido do painel, mas mantido para compatibilidade)
 class RemoverUsuarioModal(Modal, title="🗑️ Remover Usuário"):
     user_id = TextInput(label="ID do usuário", required=True)
     async def on_submit(self, interaction: discord.Interaction):
@@ -1442,7 +1433,7 @@ async def on_ready():
     live_check_loop.start()
 
     for guild in bot.guilds:
-        # Painel criar canal (apenas o botão de criar, sem remover membro)
+        # Painel criar canal (apenas o botão de criar)
         categoria_painel = guild.get_channel(CATEGORIA_PAINEL_ID)
         if categoria_painel:
             canal_criar = discord.utils.get(categoria_painel.channels, name="criar-canal")
@@ -1452,7 +1443,7 @@ async def on_ready():
                 if msg.author == bot.user:
                     await msg.delete()
             embed_criar = discord.Embed(
-                title="🔓 SISTEMA DE FARM",
+                title="📦 SISTEMA DE FARM",
                 description="Clique no botão abaixo para criar seu canal privado!",
                 color=0x2c2f33
             )

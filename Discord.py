@@ -266,51 +266,19 @@ class ConfirmarResetView(View):
         await interaction.response.send_message("Reset cancelado.", ephemeral=True)
         self.stop()
 
-# ========= SISTEMA DE REGISTRO (com Select de líderes) =========
+# ========= SISTEMA DE REGISTRO (sem seleção de recrutador) =========
 class SolicitarSetModal(Modal, title="📋 Registro"):
     id_jogo = TextInput(label="Seu ID", placeholder="Digite seu ID", required=True)
     nome = TextInput(label="Seu nome no jogo", placeholder="Digite seu nome no jogo", required=True)
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
-        self.id_val = self.id_jogo.value.strip()
-        self.nome_val = self.nome.value.strip()
-        # Buscar membros com cargos de líder
-        guild = interaction.guild
-        lideres = []
-        for member in guild.members:
-            if tem_cargo(member, CARGO_ADMIN_IDS):
-                lideres.append(member)
-        if not lideres:
-            await interaction.followup.send("❌ Nenhum líder (cargos 00,01,02 ou Gerente) encontrado no servidor. Registro cancelado.", ephemeral=True)
-            return
-        # Construir opções do select
-        options = []
-        for lider in lideres[:25]:
-            options.append(discord.SelectOption(label=lider.display_name, value=str(lider.id), emoji="👤"))
-        view = RecrutadorSelectView(self, options)
-        await interaction.followup.send("Selecione quem te recrutou (apenas líderes):", view=view, ephemeral=True)
-
-class RecrutadorSelectView(View):
-    def __init__(self, modal, options):
-        super().__init__(timeout=120)
-        self.modal = modal
-        select = Select(placeholder="Escolha o recrutador", options=options, min_values=1, max_values=1)
-        select.callback = self.select_callback
-        self.add_item(select)
-
-    async def select_callback(self, interaction: discord.Interaction):
-        selected_user_id = int(interaction.data["values"][0])
-        recrutador = interaction.guild.get_member(selected_user_id)
-        if not recrutador:
-            await interaction.response.send_message("Recrutador não encontrado.", ephemeral=True)
-            return
+        id_val = self.id_jogo.value.strip()
+        nome_val = self.nome.value.strip()
         pedido_id = str(int(datetime.now().timestamp()))
         dados["sets_pendentes"][pedido_id] = {
             "solicitante_id": interaction.user.id,
-            "solicitante_nome": self.modal.nome_val,
-            "id_jogo": self.modal.id_val,
-            "recrutador_id": selected_user_id,
-            "recrutador_nome": recrutador.display_name,
+            "solicitante_nome": nome_val,
+            "id_jogo": id_val,
             "status": "pendente",
             "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -319,22 +287,20 @@ class RecrutadorSelectView(View):
         if canal_registros:
             embed = discord.Embed(
                 title="🆕 NOVO REGISTRO",
-                description=f"**Nome:** {self.modal.nome_val}\n**ID:** {self.modal.id_val}\n**Solicitante:** <@{interaction.user.id}>\n**Recrutador:** {recrutador.mention}\n**Data:** {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                description=f"**Nome:** {nome_val}\n**ID:** {id_val}\n**Solicitante:** <@{interaction.user.id}>\n**Data:** {datetime.now().strftime('%d/%m/%Y %H:%M')}",
                 color=0x2c2f33,
                 timestamp=datetime.now()
             )
             embed.set_footer(text=f"ID: {pedido_id}")
-            view = AprovarSetView(pedido_id, interaction.user.id, selected_user_id)
+            view = AprovarSetView(pedido_id, interaction.user.id)
             await canal_registros.send(embed=embed, view=view)
         await interaction.response.send_message("✅ Registro enviado! Aguarde a aprovação.", ephemeral=True)
-        self.stop()
 
 class AprovarSetView(View):
-    def __init__(self, pedido_id, solicitante_id, recrutador_id):
+    def __init__(self, pedido_id, solicitante_id):
         super().__init__(timeout=None)
         self.pedido_id = pedido_id
         self.solicitante_id = solicitante_id
-        self.recrutador_id = recrutador_id
     @discord.ui.button(label="✅ Aprovar Registro", style=discord.ButtonStyle.success, emoji="✅")
     async def aprovar(self, interaction: discord.Interaction, button: Button):
         if not pode_aprovar_set(interaction.user):
@@ -369,13 +335,6 @@ class AprovarSetView(View):
             pedido["aprovado_por"] = interaction.user.id
             pedido["cargo_dado"] = CARGO_MEMBRO_ID
             salvar_dados()
-            # Notificar recrutador
-            recrutador = guild.get_member(self.recrutador_id)
-            if recrutador:
-                try:
-                    await recrutador.send(f"✅ O registro de {membro.mention} foi aprovado por {interaction.user.mention}!")
-                except:
-                    pass
             # Notificar novo membro
             try:
                 await membro.send(f"✅ Parabéns! Seu registro foi **aprovado** e você recebeu o cargo {cargo_membro.mention}. Seu apelido foi alterado para **{novo_nick}**. Bem-vindo(a)!")
@@ -386,7 +345,7 @@ class AprovarSetView(View):
             if canal_registros:
                 embed = discord.Embed(
                     title="✅ REGISTRO APROVADO",
-                    description=f"**Nome:** {pedido['solicitante_nome']}\n**ID:** {pedido['id_jogo']}\n**Solicitante:** <@{self.solicitante_id}>\n**Recrutador:** <@{self.recrutador_id}>\n**Cargo atribuído:** {cargo_membro.mention}\n**Apelido alterado para:** {novo_nick}\n**Aprovado por:** {interaction.user.mention}",
+                    description=f"**Nome:** {pedido['solicitante_nome']}\n**ID:** {pedido['id_jogo']}\n**Solicitante:** <@{self.solicitante_id}>\n**Cargo atribuído:** {cargo_membro.mention}\n**Apelido alterado para:** {novo_nick}\n**Aprovado por:** {interaction.user.mention}",
                     color=0x2c2f33,
                     timestamp=datetime.now()
                 )
@@ -1489,7 +1448,7 @@ async def on_ready():
                     await msg.delete()
             embed_set = discord.Embed(
                 title="📋 REGISTRO",
-                description="Clique no botão abaixo para fazer seu registro. Você precisará informar seu ID e nome no jogo, e depois selecionar um líder (cargos 00,01,02 ou Gerente) como recrutador.",
+                description="Clique no botão abaixo para fazer seu registro. Preencha seu ID e nome no jogo.",
                 color=0x2c2f33
             )
             view = View(timeout=None)

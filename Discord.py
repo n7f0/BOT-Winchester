@@ -31,7 +31,7 @@ CHAT_LOGS_ID = 1515876949233504267
 CHAT_ADMIN_LOGS_ID = 1515876971089760326
 CHAT_RANK_ID = 1515877095685750894
 LOG_REGISTROS_ID = int(os.getenv("LOG_REGISTROS_ID", "1498349960062570740"))
-CHAT_PEDIDOS_LOG_ID = 1516080167632502794   # NOVO canal de logs de pedidos
+CHAT_PEDIDOS_LOG_ID = 1516080167632502794
 
 CANAL_LIVES_PAINEL_ID = 1515937074359046235
 CANAL_COMPRA_VENDA_ID = 1515937419395072030
@@ -106,7 +106,6 @@ async def log_admin_embed(titulo, descricao, cor, thumbnail=None, fields=None):
         await canal.send(embed=embed)
 
 async def log_pedido_embed(titulo, descricao, cor, fields=None):
-    """Envia logs do sistema de pedidos para o canal específico"""
     canal = bot.get_channel(CHAT_PEDIDOS_LOG_ID)
     if canal:
         embed = discord.Embed(title=titulo, description=descricao, color=cor, timestamp=datetime.now())
@@ -269,7 +268,7 @@ class ConfirmarResetView(View):
         await interaction.response.send_message("Reset cancelado.", ephemeral=True)
         self.stop()
 
-# ========= SISTEMA DE REGISTRO (antigo SET) =========
+# ========= SISTEMA DE REGISTRO (com auto‑atribuição do cargo Membro) =========
 class SolicitarSetModal(Modal, title="📋 Registro"):
     id_jogo = TextInput(label="Seu ID", placeholder="Digite seu ID", required=True)
     nome = TextInput(label="Seu nome no jogo", placeholder="Digite seu nome no jogo", required=True)
@@ -284,13 +283,11 @@ class RecrutadorSelectView(View):
     def __init__(self, modal):
         super().__init__(timeout=120)
         self.modal = modal
-        # Select apenas para cargos de líder (00,01,02,Gerente)
         select = UserSelect(placeholder="Escolha o recrutador (apenas líderes)", min_values=1, max_values=1)
         select.callback = self.select_callback
         self.add_item(select)
 
     async def select_callback(self, interaction: discord.Interaction):
-        # Filtrar apenas membros com os cargos permitidos
         selected_user_id = int(interaction.data["values"][0])
         membro = interaction.guild.get_member(selected_user_id)
         if not membro:
@@ -341,8 +338,60 @@ class AprovarSetView(View):
         if not pedido or pedido["status"] != "pendente":
             await interaction.response.send_message("Este pedido já foi processado ou não existe.", ephemeral=True)
             return
-        view = EscolherCargoView(self.pedido_id, self.solicitante_id, self.recrutador_id)
-        await interaction.response.send_message("Selecione o cargo que deseja atribuir ao novo membro:", view=view, ephemeral=True)
+        # Auto‑aprovação: concede o cargo Membro diretamente, sem escolher
+        guild = interaction.guild
+        membro = guild.get_member(self.solicitante_id)
+        if not membro:
+            await interaction.response.send_message("Solicitante não encontrado no servidor.", ephemeral=True)
+            return
+        cargo_membro = guild.get_role(CARGO_MEMBRO_ID)
+        if not cargo_membro:
+            await interaction.response.send_message("Cargo Membro não encontrado.", ephemeral=True)
+            return
+        try:
+            # Altera o apelido
+            nome_registro = pedido["solicitante_nome"]
+            id_registro = pedido["id_jogo"]
+            novo_nick = f"{nome_registro} [{id_registro}]"
+            if guild.me.guild_permissions.change_nickname and guild.me.guild_permissions.manage_nicknames:
+                try:
+                    await membro.edit(nick=novo_nick, reason=f"Registro aprovado: {nome_registro} [{id_registro}]")
+                except:
+                    pass
+            # Concede o cargo Membro
+            await membro.add_roles(cargo_membro, reason=f"Registro aprovado por {interaction.user.name}")
+            pedido["status"] = "aprovado"
+            pedido["aprovado_por"] = interaction.user.id
+            pedido["cargo_dado"] = CARGO_MEMBRO_ID
+            salvar_dados()
+            # Notifica recrutador
+            recrutador = guild.get_member(self.recrutador_id)
+            if recrutador:
+                try:
+                    await recrutador.send(f"✅ O registro de {membro.mention} foi aprovado por {interaction.user.mention}!")
+                except:
+                    pass
+            # Notifica o novo membro
+            try:
+                await membro.send(f"✅ Parabéns! Seu registro foi **aprovado** e você recebeu o cargo {cargo_membro.mention}. Seu apelido foi alterado para **{novo_nick}**. Bem-vindo(a)!")
+            except:
+                pass
+            # Atualiza o embed no canal de registros
+            canal_registros = bot.get_channel(CANAL_REGISTROS_SET_ID)
+            if canal_registros:
+                embed = discord.Embed(
+                    title="✅ REGISTRO APROVADO",
+                    description=f"**Nome:** {pedido['solicitante_nome']}\n**ID:** {pedido['id_jogo']}\n**Solicitante:** <@{self.solicitante_id}>\n**Recrutador:** <@{self.recrutador_id}>\n**Cargo atribuído:** {cargo_membro.mention}\n**Apelido alterado para:** {novo_nick}\n**Aprovado por:** {interaction.user.mention}",
+                    color=0x2c2f33,
+                    timestamp=datetime.now()
+                )
+                async for msg in canal_registros.history(limit=20):
+                    if msg.author == bot.user and msg.embeds and str(self.pedido_id) in (msg.embeds[0].footer.text if msg.embeds[0].footer else ""):
+                        await msg.edit(embed=embed, view=None)
+                        break
+            await interaction.response.send_message(f"✅ Registro aprovado! Cargo {cargo_membro.mention} atribuído a {membro.mention}. Apelido alterado para **{novo_nick}**.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Erro ao aprovar registro: {e}", ephemeral=True)
     @discord.ui.button(label="❌ Recusar Registro", style=discord.ButtonStyle.danger, emoji="❌")
     async def recusar(self, interaction: discord.Interaction, button: Button):
         if not pode_aprovar_set(interaction.user):
@@ -362,70 +411,6 @@ class AprovarSetView(View):
         embed = discord.Embed(title="❌ REGISTRO RECUSADO", description=f"Pedido ID: {self.pedido_id}\nRecusado por: {interaction.user.mention}", color=0x4f545c, timestamp=datetime.now())
         await interaction.message.edit(embed=embed, view=None)
         await interaction.response.send_message("Registro recusado!", ephemeral=True)
-
-class EscolherCargoView(View):
-    def __init__(self, pedido_id, solicitante_id, recrutador_id):
-        super().__init__(timeout=120)
-        self.pedido_id = pedido_id
-        self.solicitante_id = solicitante_id
-        self.recrutador_id = recrutador_id
-        options = [discord.SelectOption(label="Membro", value=str(CARGO_MEMBRO_ID), description="Cargo padrão de membro", emoji="🛡️")]
-        select = Select(placeholder="Escolha o cargo...", options=options, min_values=1, max_values=1)
-        select.callback = self.cargo_selecionado
-        self.add_item(select)
-    async def cargo_selecionado(self, interaction: discord.Interaction):
-        cargo_id = int(self.children[0].values[0])
-        guild = interaction.guild
-        membro = guild.get_member(self.solicitante_id)
-        if not membro:
-            await interaction.response.send_message("Solicitante não encontrado no servidor.", ephemeral=True)
-            return
-        cargo = guild.get_role(cargo_id)
-        if not cargo:
-            await interaction.response.send_message("Cargo não encontrado.", ephemeral=True)
-            return
-        try:
-            pedido = dados["sets_pendentes"].get(self.pedido_id)
-            if pedido:
-                nome_registro = pedido["solicitante_nome"]
-                id_registro = pedido["id_jogo"]
-                novo_nick = f"{nome_registro} [{id_registro}]"
-                if guild.me.guild_permissions.change_nickname and guild.me.guild_permissions.manage_nicknames:
-                    try:
-                        await membro.edit(nick=novo_nick, reason=f"Registro aprovado: {nome_registro} [{id_registro}]")
-                    except:
-                        pass
-            await membro.add_roles(cargo, reason=f"Registro aprovado por {interaction.user.name}")
-            if pedido:
-                pedido["status"] = "aprovado"
-                pedido["aprovado_por"] = interaction.user.id
-                pedido["cargo_dado"] = cargo_id
-                salvar_dados()
-            recrutador = guild.get_member(self.recrutador_id)
-            if recrutador:
-                try:
-                    await recrutador.send(f"✅ O registro de {membro.mention} foi aprovado por {interaction.user.mention}!")
-                except:
-                    pass
-            try:
-                await membro.send(f"✅ Parabéns! Seu registro foi **aprovado** e você recebeu o cargo {cargo.mention}. Seu apelido foi alterado para **{novo_nick}**. Bem-vindo(a)!")
-            except:
-                pass
-            canal_registros = bot.get_channel(CANAL_REGISTROS_SET_ID)
-            if canal_registros:
-                embed = discord.Embed(
-                    title="✅ REGISTRO APROVADO",
-                    description=f"**Nome:** {pedido['solicitante_nome']}\n**ID:** {pedido['id_jogo']}\n**Solicitante:** <@{self.solicitante_id}>\n**Recrutador:** <@{self.recrutador_id}>\n**Cargo atribuído:** {cargo.mention}\n**Apelido alterado para:** {novo_nick}\n**Aprovado por:** {interaction.user.mention}",
-                    color=0x2c2f33,
-                    timestamp=datetime.now()
-                )
-                async for msg in canal_registros.history(limit=20):
-                    if msg.author == bot.user and msg.embeds and str(self.pedido_id) in (msg.embeds[0].footer.text if msg.embeds[0].footer else ""):
-                        await msg.edit(embed=embed, view=None)
-                        break
-            await interaction.response.send_message(f"✅ Registro aprovado! Cargo {cargo.mention} atribuído a {membro.mention}. Apelido alterado para **{novo_nick}**.", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"Erro ao atribuir cargo ou alterar apelido: {e}", ephemeral=True)
 
 # ========= SISTEMA DE LIVES =========
 def extract_platform_from_url(url: str):
@@ -1377,7 +1362,6 @@ class NovoPedidoModal(Modal, title="📝 Novo Pedido"):
         embed.add_field(name="Distribuição", value=f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({pcts['fac']}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)", inline=False)
         embed.set_footer(text=f"Pedido #{pedido['id']} - Criado por {interaction.user.name}")
         await interaction.followup.send(embed=embed, ephemeral=True)
-        # Log no canal específico
         await log_pedido_embed(
             "📝 NOVO PEDIDO",
             f"Pedido #{pedido['id']} criado por {interaction.user.mention}",

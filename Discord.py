@@ -13,7 +13,7 @@ if not TOKEN:
     print("ERRO: Token do Discord não encontrado!")
     sys.exit(1)
 
-# IDs
+# IDs fornecidos
 CARGO_00_ID = 1083520579564478555
 CARGO_01_ID = 1083540466676539483
 CARGO_02_ID = 1083540964959854612
@@ -381,103 +381,43 @@ async def restaurar_canais_farms():
                     tipo = "ADMIN" if is_admin(user) else "MEMBRO"
                     embed = discord.Embed(
                         title="🔐 SEU CANAL PRIVADO",
-                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)** (cargos 00,01,02,Gerente)\n✏️ **Editar Registro**\n📋 **Meus Registros**",
+                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**\n📊 **Fechar Caixa**\n✏️ **Mudar Nome**\n📜 **Histórico Caixa**\n🔄 **Reset Semanal**\n🗑️ **Fechar Canal**",
                         color=0x2c2f33
                     )
-                    if tipo == "ADMIN":
-                        embed.description += "\n\n**BOTÕES ADMINISTRATIVOS:**\n📊 **Fechar Caixa**\n✏️ **Mudar Nome**\n📜 **Histórico Caixa**\n🔄 **Reset Semanal**\n🗑️ **Fechar Canal**"
                     await canal.send(embed=embed, view=view)
 
-# ========= MODAIS =========
-class DinheiroSujoAdminModal(Modal, title="💰 Registrar Dinheiro Sujo (Admin)"):
-    valor = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
+# ========= MODAIS DE FARM (DOIS MODAIS SEQUENCIAIS) =========
+class FarmProdutosModalSlot(Modal, title="📦 Farm Produtos - Etapa 1/2"):
+    slot = TextInput(label="SLOT (número)", placeholder="Ex: 1, 2, 3...", required=True)
+
     def __init__(self, user_id, user_name, canal):
         super().__init__()
         self.user_id = user_id
         self.user_name = user_name
         self.canal = canal
+
     async def on_submit(self, interaction: discord.Interaction):
-        if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Você não tem permissão para registrar dinheiro sujo.", ephemeral=True)
+        slot_num = self.slot.value.strip()
+        if not slot_num.isdigit():
+            await interaction.response.send_message("Slot deve ser um número!", ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            valor = float(self.valor.value.replace(",", "."))
-        except ValueError:
-            await interaction.followup.send("Valor inválido!", ephemeral=True)
-            return
-        await interaction.followup.send("📸 Agora envie a **print do comprovante** aqui no canal.", ephemeral=True)
-        def check(m):
-            return m.author == interaction.user and m.channel == self.canal and m.attachments and any(a.content_type and a.content_type.startswith('image/') for a in m.attachments)
-        try:
-            msg = await bot.wait_for('message', timeout=60.0, check=check)
-        except asyncio.TimeoutError:
-            await interaction.followup.send("Tempo esgotado!", ephemeral=True)
-            return
-        imagem_url = msg.attachments[0].url
-        view = SelecionarMembroView(self.user_id, self.user_name, self.canal, valor, imagem_url, interaction.user)
-        await interaction.followup.send("Selecione o membro que recebeu o dinheiro:", view=view, ephemeral=True)
+        # Armazena temporariamente o slot e abre o segundo modal
+        modal_produtos = FarmProdutosModalProdutos(self.user_id, self.user_name, self.canal, int(slot_num))
+        await interaction.response.send_modal(modal_produtos)
 
-class SelecionarMembroView(View):
-    def __init__(self, target_user_id, target_user_name, canal, valor, imagem_url, admin_user):
-        super().__init__(timeout=120)
-        self.target_user_id = target_user_id
-        self.target_user_name = target_user_name
-        self.canal = canal
-        self.valor = valor
-        self.imagem_url = imagem_url
-        self.admin_user = admin_user
-        select = UserSelect(placeholder="Escolha o membro que recebeu o dinheiro", min_values=1, max_values=1)
-        select.callback = self.membro_selecionado
-        self.add_item(select)
-    async def membro_selecionado(self, interaction: discord.Interaction):
-        if interaction.user.id != self.admin_user.id:
-            await interaction.response.send_message("Apenas o admin que iniciou pode selecionar.", ephemeral=True)
-            return
-        membro_id = int(interaction.data["values"][0])
-        membro_obj = interaction.guild.get_member(membro_id)
-        if not membro_obj:
-            await interaction.response.send_message("Membro não encontrado.", ephemeral=True)
-            return
-        if str(self.target_user_id) not in dados["usuarios"]:
-            dados["usuarios"][str(self.target_user_id)] = {"farms": [], "pagamentos": [], "nome": self.target_user_name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
-        if "transacoes_dinheiro_sujo" not in dados["usuarios"][str(self.target_user_id)]:
-            dados["usuarios"][str(self.target_user_id)]["transacoes_dinheiro_sujo"] = []
-        transacao = {
-            "valor": self.valor,
-            "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "print_url": self.imagem_url,
-            "registrado_por": interaction.user.id,
-            "membro_recebedor": membro_id,
-            "membro_nome": membro_obj.name
-        }
-        dados["usuarios"][str(self.target_user_id)]["transacoes_dinheiro_sujo"].append(transacao)
-        dados["usuarios"][str(self.target_user_id)]["dinheiro_sujo"] = sum(t["valor"] for t in dados["usuarios"][str(self.target_user_id)]["transacoes_dinheiro_sujo"])
-        salvar_dados()
-        embed = discord.Embed(title="💰 DINHEIRO SUJO REGISTRADO", description=f"**Usuário:** <@{self.target_user_id}>\n**Valor:** R$ {self.valor:,.2f}\n**Membro que recebeu:** {membro_obj.mention}\n**Registrado por:** {interaction.user.mention}", color=0x4f545c, timestamp=datetime.now())
-        embed.set_image(url=self.imagem_url)
-        await self.canal.send(embed=embed)
-        canal_registros = bot.get_channel(LOG_REGISTROS_ID)
-        if canal_registros:
-            await canal_registros.send(embed=embed)
-        await interaction.response.send_message(f"R$ {self.valor:,.2f} registrado como dinheiro sujo para {self.target_user_name}!", ephemeral=True)
-        await log_acao("registrar_dinheiro_sujo", self.admin_user, f"Usuário: {self.target_user_name}\nValor: R$ {self.valor:,.2f}\nMembro: {membro_obj.name}", 0x4f545c)
-        await atualizar_ranking()
-        self.stop()
+class FarmProdutosModalProdutos(Modal, title="📦 Farm Produtos - Etapa 2/2"):
+    relogio = TextInput(label="RELÓGIO DE LUXO - Quantidade", placeholder="Ex: 5", required=False)
+    obra = TextInput(label="OBRA DE ARTE - Quantidade", placeholder="Ex: 2", required=False)
+    bebida = TextInput(label="BEBIDA IMPORTADA - Quantidade", placeholder="Ex: 10", required=False)
+    acoes = TextInput(label="AÇÕES DE EMPRESA - Quantidade", placeholder="Ex: 100", required=False)
+    nft = TextInput(label="CARTEIRA NFT - Quantidade", placeholder="Ex: 1", required=False)
 
-class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
-    slot = TextInput(label="SLOT (número)", placeholder="Ex: 1", required=True)
-    relogio = TextInput(label="RELÓGIO DE LUXO - Quantidade", required=False)
-    obra = TextInput(label="OBRA DE ARTE - Quantidade", required=False)
-    bebida = TextInput(label="BEBIDA IMPORTADA - Quantidade", required=False)
-    acoes = TextInput(label="AÇÕES DE EMPRESA - Quantidade", required=False)
-    nft = TextInput(label="CARTEIRA NFT - Quantidade", required=False)
-
-    def __init__(self, user_id, user_name, canal):
+    def __init__(self, user_id, user_name, canal, slot_num):
         super().__init__()
         self.user_id = user_id
         self.user_name = user_name
         self.canal = canal
+        self.slot_num = slot_num
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -493,27 +433,23 @@ class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
         if not produtos:
             await interaction.followup.send("Nenhum produto válido!", ephemeral=True)
             return
-        slot_num = self.slot.value.strip()
-        if not slot_num.isdigit():
-            await interaction.followup.send("Slot deve ser um número!", ephemeral=True)
-            return
-        await interaction.followup.send("📸 Envie a **print da farm** aqui no canal.", ephemeral=True)
+
+        await interaction.followup.send("📸 Agora envie a **print da farm** aqui no canal.", ephemeral=True)
         def check(m):
-            return m.author == interaction.user and m.channel == self.canal and m.attachments
+            return m.author == interaction.user and m.channel == self.canal and m.attachments and any(a.content_type and a.content_type.startswith('image/') for a in m.attachments)
         try:
             msg = await bot.wait_for('message', timeout=60.0, check=check)
         except asyncio.TimeoutError:
             await interaction.followup.send("Tempo esgotado!", ephemeral=True)
             return
-        if not msg.attachments:
-            await interaction.followup.send("Nenhuma imagem enviada. Registro cancelado.", ephemeral=True)
-            return
         imagem_url = msg.attachments[0].url
+
         if str(self.user_id) not in dados["usuarios"]:
             dados["usuarios"][str(self.user_id)] = {"farms": [], "pagamentos": [], "nome": self.user_name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
+
         registro = {
             "produtos": produtos,
-            "slot": int(slot_num),
+            "slot": self.slot_num,
             "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "print_url": imagem_url,
             "validado": True,
@@ -521,7 +457,8 @@ class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
         }
         dados["usuarios"][str(self.user_id)]["farms"].append(registro)
         salvar_dados()
-        embed = discord.Embed(title="✅ FARM PRODUTOS REGISTRADA", description=f"**Usuário:** <@{self.user_id}>\n**Slot:** {slot_num}\n", color=0x2c2f33)
+
+        embed = discord.Embed(title="✅ FARM PRODUTOS REGISTRADA", description=f"**Usuário:** <@{self.user_id}>\n**Slot:** {self.slot_num}\n", color=0x2c2f33)
         desc = "".join(f"🔹 **{p['produto']}:** {p['quantidade']} itens\n" for p in produtos)
         embed.description += desc
         embed.add_field(name="📅 Data", value=datetime.now().strftime("%d/%m/%Y às %H:%M"), inline=False)
@@ -531,17 +468,98 @@ class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
         canal_registros = bot.get_channel(LOG_REGISTROS_ID)
         if canal_registros:
             await canal_registros.send(embed=embed)
-        await interaction.followup.send("Farm registrada com sucesso!", ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         produtos_str = ', '.join(f"{p['produto']}: {p['quantidade']}" for p in produtos)
-        await log_acao("registrar_farm", interaction.user, f"Produtos: {produtos_str} | Slot: {slot_num}")
-        await log_admin("📦 NOVA FARM PRODUTOS", f"Usuário: {interaction.user.mention}\nProdutos: {produtos_str}\nSlot: {slot_num}", 0x2c2f33)
+        await log_acao("registrar_farm", interaction.user, f"Produtos: {produtos_str} | Slot: {self.slot_num}")
+        await log_admin("📦 NOVA FARM PRODUTOS", f"Usuário: {interaction.user.mention}\nProdutos: {produtos_str}\nSlot: {self.slot_num}", 0x2c2f33)
         await atualizar_ranking()
 
-# ========= OUTROS BOTÕES (Pagamento, Fechamento, Edição) =========
-# Mantenha os códigos originais de PagamentoFarmModal, FechamentoSummaryView, FechamentoCaixaModal, etc.
-# Devido ao limite de caracteres, não os repetirei, mas você pode usar os que já possui.
+# ========= MODAL ADMIN DINHEIRO SUJO =========
+class DinheiroSujoAdminModal(Modal, title="💰 Registrar Dinheiro Sujo (Admin)"):
+    valor = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
 
-# ========= VIEW DO CANAL PRIVADO (BOTÕES CORRIGIDOS) =========
+    def __init__(self, user_id, user_name, canal):
+        super().__init__()
+        self.user_id = user_id
+        self.user_name = user_name
+        self.canal = canal
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not pode_registrar_acao(interaction.user):
+            await interaction.response.send_message("Você não tem permissão para registrar dinheiro sujo.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            valor = float(self.valor.value.replace(",", "."))
+        except ValueError:
+            await interaction.followup.send("Valor inválido!", ephemeral=True)
+            return
+
+        await interaction.followup.send("📸 Agora envie a **print do comprovante** aqui no canal.", ephemeral=True)
+        def check(m):
+            return m.author == interaction.user and m.channel == self.canal and m.attachments and any(a.content_type and a.content_type.startswith('image/') for a in m.attachments)
+        try:
+            msg = await bot.wait_for('message', timeout=60.0, check=check)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Tempo esgotado!", ephemeral=True)
+            return
+        imagem_url = msg.attachments[0].url
+
+        view = SelecionarMembroView(self.user_id, self.user_name, self.canal, valor, imagem_url, interaction.user)
+        await interaction.followup.send("Selecione o membro que recebeu o dinheiro:", view=view, ephemeral=True)
+
+class SelecionarMembroView(View):
+    def __init__(self, target_user_id, target_user_name, canal, valor, imagem_url, admin_user):
+        super().__init__(timeout=120)
+        self.target_user_id = target_user_id
+        self.target_user_name = target_user_name
+        self.canal = canal
+        self.valor = valor
+        self.imagem_url = imagem_url
+        self.admin_user = admin_user
+        select = UserSelect(placeholder="Escolha o membro que recebeu o dinheiro", min_values=1, max_values=1)
+        select.callback = self.membro_selecionado
+        self.add_item(select)
+
+    async def membro_selecionado(self, interaction: discord.Interaction):
+        if interaction.user.id != self.admin_user.id:
+            await interaction.response.send_message("Apenas o admin que iniciou pode selecionar.", ephemeral=True)
+            return
+        membro_id = int(interaction.data["values"][0])
+        membro_obj = interaction.guild.get_member(membro_id)
+        if not membro_obj:
+            await interaction.response.send_message("Membro não encontrado.", ephemeral=True)
+            return
+
+        if str(self.target_user_id) not in dados["usuarios"]:
+            dados["usuarios"][str(self.target_user_id)] = {"farms": [], "pagamentos": [], "nome": self.target_user_name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
+        if "transacoes_dinheiro_sujo" not in dados["usuarios"][str(self.target_user_id)]:
+            dados["usuarios"][str(self.target_user_id)]["transacoes_dinheiro_sujo"] = []
+
+        transacao = {
+            "valor": self.valor,
+            "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "print_url": self.imagem_url,
+            "registrado_por": interaction.user.id,
+            "membro_recebedor": membro_id,
+            "membro_nome": membro_obj.name
+        }
+        dados["usuarios"][str(self.target_user_id)]["transacoes_dinheiro_sujo"].append(transacao)
+        dados["usuarios"][str(self.target_user_id)]["dinheiro_sujo"] = sum(t["valor"] for t in dados["usuarios"][str(self.target_user_id)]["transacoes_dinheiro_sujo"])
+        salvar_dados()
+
+        embed = discord.Embed(title="💰 DINHEIRO SUJO REGISTRADO", description=f"**Usuário:** <@{self.target_user_id}>\n**Valor:** R$ {self.valor:,.2f}\n**Membro que recebeu:** {membro_obj.mention}\n**Registrado por:** {interaction.user.mention}", color=0x4f545c, timestamp=datetime.now())
+        embed.set_image(url=self.imagem_url)
+        await self.canal.send(embed=embed)
+        canal_registros = bot.get_channel(LOG_REGISTROS_ID)
+        if canal_registros:
+            await canal_registros.send(embed=embed)
+        await interaction.response.send_message(f"R$ {self.valor:,.2f} registrado como dinheiro sujo para {self.target_user_name}!", ephemeral=True)
+        await log_acao("registrar_dinheiro_sujo", self.admin_user, f"Usuário: {self.target_user_name}\nValor: R$ {self.valor:,.2f}\nMembro: {membro_obj.name}", 0x4f545c)
+        await atualizar_ranking()
+        self.stop()
+
+# ========= VIEW DO CANAL PRIVADO =========
 class FarmChannelView(View):
     def __init__(self, user_id, user_name, canal_id):
         super().__init__(timeout=None)
@@ -551,11 +569,12 @@ class FarmChannelView(View):
 
     @discord.ui.button(label="📦 Farm Produtos", style=discord.ButtonStyle.secondary, emoji="📦", row=0)
     async def farm_produtos(self, interaction: discord.Interaction, button: Button):
-        # NENHUMA VERIFICAÇÃO - envia o modal imediatamente
-        try:
-            await interaction.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel))
-        except Exception as e:
-            await interaction.response.send_message(f"Erro ao abrir o formulário: {e}", ephemeral=True)
+        # Apenas o dono do canal ou admin
+        if interaction.user.id != self.user_id and not is_admin(interaction.user):
+            await interaction.response.send_message("Apenas o dono do canal pode registrar farm!", ephemeral=True)
+            return
+        # Abre o primeiro modal (slot)
+        await interaction.response.send_modal(FarmProdutosModalSlot(self.user_id, self.user_name, interaction.channel))
 
     @discord.ui.button(label="💰 Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0)
     async def registrar_dinheiro_sujo_admin(self, interaction: discord.Interaction, button: Button):
@@ -566,37 +585,35 @@ class FarmChannelView(View):
 
     @discord.ui.button(label="✏️ Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", row=0)
     async def editar_registro(self, interaction: discord.Interaction, button: Button):
-        # Não implementado totalmente, apenas aviso
-        await interaction.response.send_message("Função em desenvolvimento.", ephemeral=True)
+        await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
     @discord.ui.button(label="📊 Fechar Caixa", style=discord.ButtonStyle.secondary, emoji="📊", row=1)
     async def fechar_caixa(self, interaction: discord.Interaction, button: Button):
-        # Implementação simplificada
-        await interaction.response.send_message("Função em desenvolvimento.", ephemeral=True)
+        await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
     @discord.ui.button(label="✏️ Mudar Nome", style=discord.ButtonStyle.secondary, emoji="✏️", row=1)
     async def mudar_nome(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("Função em desenvolvimento.", ephemeral=True)
+        await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
     @discord.ui.button(label="📜 Histórico Caixa", style=discord.ButtonStyle.secondary, emoji="📜", row=1)
     async def historico_caixa(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("Função em desenvolvimento.", ephemeral=True)
+        await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
     @discord.ui.button(label="📋 Meus Registros", style=discord.ButtonStyle.primary, emoji="📋", row=2)
     async def meus_registros(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("Função em desenvolvimento.", ephemeral=True)
+        await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
     @discord.ui.button(label="🔄 Reset Semanal", style=discord.ButtonStyle.danger, emoji="🔄", row=2)
     async def reset_semanal(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("Função em desenvolvimento.", ephemeral=True)
+        await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
     @discord.ui.button(label="🗑️ Fechar Canal", style=discord.ButtonStyle.danger, emoji="🗑️", row=2)
     async def fechar_canal(self, interaction: discord.Interaction, button: Button):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores (cargo 00)!", ephemeral=True)
             return
-        # Confirmação
-        await interaction.response.send_message("Função em desenvolvimento.", ephemeral=True)
+        # Implementação simplificada
+        await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
 # ========= BOTÃO CRIAR CANAL =========
 class BotaoCriarCanalView(View):
@@ -639,7 +656,7 @@ class BotaoCriarCanalView(View):
             view = FarmChannelView(interaction.user.id, interaction.user.name, canal.id)
             embed = discord.Embed(
                 title="🔐 SEU CANAL PRIVADO",
-                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**",
+                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)**\n✏️ **Editar Registro**\n📋 **Meus Registros**",
                 color=0x2c2f33
             )
             await canal.send(embed=embed, view=view)
@@ -648,6 +665,59 @@ class BotaoCriarCanalView(View):
             await atualizar_ranking()
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:200]}", ephemeral=True)
+
+# ========= SISTEMA DE PEDIDOS (simplificado) =========
+class PedidoView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    @discord.ui.button(label="📝 Novo Pedido", style=discord.ButtonStyle.success, emoji="📝")
+    async def novo_pedido(self, interaction: discord.Interaction, button: Button):
+        if not pode_registrar_acao(interaction.user):
+            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem criar pedidos.", ephemeral=True)
+            return
+        await interaction.response.send_modal(NovoPedidoModal())
+
+class NovoPedidoModal(Modal, title="📝 Novo Pedido"):
+    cliente = TextInput(label="Nome do Cliente", required=True)
+    valor_total = TextInput(label="Valor Total Sujo (R$)", required=True)
+    prazo_entrega = TextInput(label="Prazo de Entrega", required=True)
+    descontado_caixa = TextInput(label="Descontado do Caixa? (Sim/Não/Pendente)", required=True)
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            valor = float(self.valor_total.value.replace(",", "."))
+        except:
+            await interaction.followup.send("Valor inválido!", ephemeral=True)
+            return
+        descontado = self.descontado_caixa.value.strip().capitalize()
+        if descontado not in ["Sim", "Não", "Pendente"]:
+            await interaction.followup.send("Valor inválido! Use Sim, Não ou Pendente.", ephemeral=True)
+            return
+        pcts = dados["pedidos"]["config"]["porcentagens"]
+        cliente_part = valor * pcts["cliente"] / 100
+        maquina_part = valor * pcts["maquina"] / 100
+        fac_part = valor * pcts["fac"] / 100
+        membros_part = valor * pcts["membros"] / 100
+        pedido = {
+            "id": len(dados["pedidos"]["lista"]) + 1,
+            "cliente": self.cliente.value.strip(),
+            "valor_total": valor,
+            "prazo_entrega": self.prazo_entrega.value.strip(),
+            "descontado_caixa": descontado,
+            "data_criacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "criado_por": interaction.user.id,
+            "distribuicao": {"cliente": cliente_part, "maquina": maquina_part, "fac": fac_part, "membros": membros_part},
+            "pago": False
+        }
+        dados["pedidos"]["lista"].append(pedido)
+        salvar_dados()
+        embed = discord.Embed(title="📝 NOVO PEDIDO CRIADO", color=0x2c2f33, timestamp=datetime.now())
+        embed.add_field(name="Cliente", value=pedido["cliente"], inline=True)
+        embed.add_field(name="Valor Total", value=f"R$ {valor:,.2f}", inline=True)
+        embed.add_field(name="Prazo", value=pedido["prazo_entrega"], inline=True)
+        embed.add_field(name="Descontado", value=descontado, inline=True)
+        embed.add_field(name="Distribuição", value=f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({pcts['fac']}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)", inline=False)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ========= EVENTOS =========
 @bot.event
@@ -671,6 +741,7 @@ async def on_member_remove(member):
 async def on_ready():
     print(f"✅ Bot {bot.user} online!")
     for guild in bot.guilds:
+        # Painel criar canal
         categoria_painel = guild.get_channel(CATEGORIA_PAINEL_ID)
         if categoria_painel:
             canal_criar = discord.utils.get(categoria_painel.channels, name="criar-canal")
@@ -685,6 +756,7 @@ async def on_ready():
                 color=0x2c2f33
             )
             await canal_criar.send(embed=embed_criar, view=BotaoCriarCanalView())
+        # Painel SET
         canal_set = guild.get_channel(CANAL_SOLICITAR_SET_ID)
         if canal_set:
             async for msg in canal_set.history(limit=5):
@@ -702,6 +774,21 @@ async def on_ready():
             button.callback = button_callback
             view.add_item(button)
             await canal_set.send(embed=embed_set, view=view)
+        # Painel Pedidos
+        categoria_pedidos = guild.get_channel(CATEGORIA_PEDIDOS_ID)
+        if categoria_pedidos:
+            canal_pedidos = discord.utils.get(categoria_pedidos.channels, name="pedidos")
+            if not canal_pedidos:
+                canal_pedidos = await categoria_pedidos.create_text_channel("pedidos")
+            async for msg in canal_pedidos.history(limit=5):
+                if msg.author == bot.user:
+                    await msg.delete()
+            embed_pedidos = discord.Embed(
+                title="📦 SISTEMA DE PEDIDOS",
+                description="Gerencie pedidos de clientes.",
+                color=0x2c2f33
+            )
+            await canal_pedidos.send(embed=embed_pedidos, view=PedidoView())
     await restaurar_canais_farms()
     await atualizar_ranking()
     await log_admin("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!", 0x2c2f33)

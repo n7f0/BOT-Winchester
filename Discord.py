@@ -14,41 +14,28 @@ if not TOKEN:
     print("ERRO: Token do Discord não encontrado!")
     sys.exit(1)
 
-# IDs fornecidos
 CARGO_00_ID = 1083520579564478555
 CARGO_01_ID = 1083540466676539483
 CARGO_02_ID = 1083540964959854612
 CARGO_GERENTE_ID = 1083541691866292296
 CARGO_MEMBRO_ID = 1083543319189143583
 
-# Canais para o sistema de SET
 CANAL_SOLICITAR_SET_ID = 1236307426366591079
 CANAL_REGISTROS_SET_ID = 1497880182265086106
-
-# Categoria onde ficarão os canais privados de farm
 CATEGORIA_FARMS_ID = 1515876568424255661
-
-# Categoria do painel principal (onde fica o canal "criar-canal")
 CATEGORIA_PAINEL_ID = 1515869907814973440
-
-# Categoria para o canal de pedidos
 CATEGORIA_PEDIDOS_ID = 1515879443380310147
 
-# Logs
 CHAT_LOGS_ID = 1515876949233504267
 CHAT_ADMIN_LOGS_ID = 1515876971089760326
 CHAT_RANK_ID = 1515877095685750894
 LOG_REGISTROS_ID = int(os.getenv("LOG_REGISTROS_ID", "1498349960062570740"))
-
-# Outros IDs
 CANAL_LOGS_COMPRA_VENDA_ID = int(os.getenv("CANAL_LOGS_COMPRA_VENDA_ID", "1509201907842023444"))
 CHAT_PEDIDOS_LOG_ID = int(os.getenv("CHAT_PEDIDOS_LOG_ID", "0"))
 
-# Grupos de permissões
 CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
 CARGO_REMOVER_MEMBRO_IDS = CARGO_ADMIN_IDS
 
-# ========= BANCO DE DADOS =========
 dados = {
     "usuarios": {},
     "canais": {},
@@ -132,7 +119,6 @@ async def limpar_logs_usuario(user_id, user_name):
         salvar_dados()
     return total_limpo
 
-# ========= CONFIGURAÇÃO DE INTENTS =========
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -162,7 +148,7 @@ def pode_aprovar_set(member):
 def pode_remover_membro(member):
     return tem_cargo(member, CARGO_REMOVER_MEMBRO_IDS)
 
-# ========= RANKING (apenas produtos de luxo) =========
+# ========= RANKING =========
 async def atualizar_ranking():
     canal = bot.get_channel(CHAT_RANK_ID)
     if not canal:
@@ -383,7 +369,7 @@ class EscolherCargoView(View):
         except Exception as e:
             await interaction.response.send_message(f"Erro ao atribuir cargo: {e}", ephemeral=True)
 
-# ========= RESTAURAÇÃO DE CANAIS DE FARM =========
+# ========= RESTAURAÇÃO =========
 async def restaurar_canais_farms():
     for user_id_str, canal_id in dados["canais"].items():
         canal = bot.get_channel(canal_id)
@@ -399,11 +385,11 @@ async def restaurar_canais_farms():
                     tipo = "ADMIN" if is_admin(user) else "MEMBRO"
                     embed = discord.Embed(
                         title="🔐 SEU CANAL PRIVADO",
-                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos** (qualquer membro)\n💰 **Registrar Dinheiro Sujo (Admin)** (cargos 00,01,02,Gerente)\n✏️ **Editar Registro**\n📋 **Meus Registros**",
+                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)** (cargos 00,01,02,Gerente)\n✏️ **Editar Registro**\n📋 **Meus Registros**",
                         color=0x2c2f33
                     )
                     if tipo == "ADMIN":
-                        embed.description += "\n\n**BOTÕES ADMINISTRATIVOS:**\n📊 **Fechar Caixa** - Fechar caixa semanal\n✏️ **Mudar Nome** - Renomear canal\n📜 **Histórico Caixa** - Ver fechamentos\n🔄 **Reset Semanal** - Limpar dados da semana\n🗑️ **Fechar Canal** - Deletar canal"
+                        embed.description += "\n\n**BOTÕES ADMINISTRATIVOS:**\n📊 **Fechar Caixa**\n✏️ **Mudar Nome**\n📜 **Histórico Caixa**\n🔄 **Reset Semanal**\n🗑️ **Fechar Canal**"
                     await canal.send(embed=embed, view=view)
 
 # ========= MODAIS DE FARM =========
@@ -412,7 +398,7 @@ class DinheiroSujoAdminModal(Modal, title="💰 Registrar Dinheiro Sujo (Admin)"
 
     def __init__(self, user_id, user_name, canal):
         super().__init__()
-        self.user_id = user_id  # dono do canal privado (quem vai receber o dinheiro sujo no registro)
+        self.user_id = user_id
         self.user_name = user_name
         self.canal = canal
 
@@ -437,7 +423,6 @@ class DinheiroSujoAdminModal(Modal, title="💰 Registrar Dinheiro Sujo (Admin)"
             return
         imagem_url = msg.attachments[0].url
 
-        # Agora pedir o membro que recebeu o dinheiro
         view = SelecionarMembroView(self.user_id, self.user_name, self.canal, valor, imagem_url, interaction.user)
         await interaction.followup.send("Selecione o membro que recebeu o dinheiro:", view=view, ephemeral=True)
 
@@ -507,7 +492,6 @@ class FarmProdutosModal(Modal, title="📦 Registrar Farm Produtos"):
         self.canal = canal
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Garantir que o modal foi submetido com sucesso
         await interaction.response.defer(ephemeral=True, thinking=True)
         produtos = []
         for campo, nome in [(self.relogio, "RELÓGIO DE LUXO"), (self.obra, "OBRA DE ARTE"), (self.bebida, "BEBIDA IMPORTADA"), (self.acoes, "AÇÕES DE EMPRESA"), (self.nft, "CARTEIRA NFT")]:
@@ -989,6 +973,7 @@ async def enviar_historico_farms(interaction, user_id, user_name):
             embed.add_field(name=f"💵 Dinheiro Sujo ({registro['data']})", value=valor, inline=False)
     await interaction.followup.send(embed=embed, ephemeral=True)
 
+# ========= VIEW DO CANAL PRIVADO (BOTÕES CORRIGIDOS) =========
 class FarmChannelView(View):
     def __init__(self, user_id, user_name, canal_id):
         super().__init__(timeout=None)
@@ -998,14 +983,11 @@ class FarmChannelView(View):
 
     @discord.ui.button(label="📦 Farm Produtos", style=discord.ButtonStyle.secondary, emoji="📦", row=0)
     async def farm_produtos(self, interaction: discord.Interaction, button: Button):
-        # Permite qualquer membro que seja dono do canal ou admin
+        # Apenas o dono do canal ou admin pode registrar farm
         if interaction.user.id != self.user_id and not is_admin(interaction.user):
             await interaction.response.send_message("Apenas o dono do canal pode registrar farm!", ephemeral=True)
             return
-        # Verificar se o usuário tem cargo de membro (opcional, mas já que o dono é membro, ok)
-        if not is_membro(interaction.user) and not is_admin(interaction.user):
-            await interaction.response.send_message("Você precisa ter o cargo de Membro para usar este botão.", ephemeral=True)
-            return
+        # Envia o modal imediatamente
         await interaction.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel))
 
     @discord.ui.button(label="💰 Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0)
@@ -1340,11 +1322,11 @@ class BotaoCriarCanalView(View):
             tipo = "ADMIN" if is_admin(interaction.user) else "MEMBRO"
             embed = discord.Embed(
                 title="🔐 SEU CANAL PRIVADO",
-                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos** (qualquer membro)\n💰 **Registrar Dinheiro Sujo (Admin)** (cargos 00,01,02,Gerente)\n✏️ **Editar Registro**\n📋 **Meus Registros**",
+                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES DISPONÍVEIS:**\n📦 **Farm Produtos**\n💰 **Registrar Dinheiro Sujo (Admin)** (cargos 00,01,02,Gerente)\n✏️ **Editar Registro**\n📋 **Meus Registros**",
                 color=0x2c2f33
             )
             if tipo == "ADMIN":
-                embed.description += "\n\n**BOTÕES ADMINISTRATIVOS:**\n📊 **Fechar Caixa** - Fechar caixa semanal\n✏️ **Mudar Nome** - Renomear canal\n📜 **Histórico Caixa** - Ver fechamentos\n🔄 **Reset Semanal** - Limpar dados da semana\n🗑️ **Fechar Canal** - Deletar canal"
+                embed.description += "\n\n**BOTÕES ADMINISTRATIVOS:**\n📊 **Fechar Caixa**\n✏️ **Mudar Nome**\n📜 **Histórico Caixa**\n🔄 **Reset Semanal**\n🗑️ **Fechar Canal**"
             await canal.send(embed=embed, view=view)
             await log_acao("criar_canal", interaction.user, f"Canal criado: {canal.mention}", 0x2c2f33)
             await interaction.followup.send(f"✅ Canal criado! Acesse: {canal.mention}", ephemeral=True)

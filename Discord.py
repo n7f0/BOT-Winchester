@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands, tasks
-from discord.ui import Button, View, Modal, TextInput, UserSelect, Select
+from discord.ui import Button, View, Modal, TextInput, Select
 import asyncio
 from datetime import datetime
 import json
@@ -82,7 +82,6 @@ def carregar_dados():
     except:
         return False
 
-# ========= LOGS BONITOS =========
 async def log_embed(titulo, descricao, cor, thumbnail=None, fields=None):
     canal_logs = bot.get_channel(CHAT_LOGS_ID)
     if canal_logs:
@@ -122,7 +121,6 @@ async def log_compra_venda(tipo, dados_log):
             embed.add_field(name=chave, value=valor, inline=False)
         await canal.send(embed=embed)
 
-# ========= LIMPEZA =========
 async def limpar_logs_usuario(user_id, user_name):
     if str(user_id) in dados["usuarios_banidos"]:
         return 0
@@ -268,7 +266,7 @@ class ConfirmarResetView(View):
         await interaction.response.send_message("Reset cancelado.", ephemeral=True)
         self.stop()
 
-# ========= SISTEMA DE REGISTRO (com auto‑atribuição do cargo Membro) =========
+# ========= SISTEMA DE REGISTRO (com Select de líderes) =========
 class SolicitarSetModal(Modal, title="📋 Registro"):
     id_jogo = TextInput(label="Seu ID", placeholder="Digite seu ID", required=True)
     nome = TextInput(label="Seu nome no jogo", placeholder="Digite seu nome no jogo", required=True)
@@ -276,34 +274,42 @@ class SolicitarSetModal(Modal, title="📋 Registro"):
         await interaction.response.defer(ephemeral=True, thinking=True)
         self.id_val = self.id_jogo.value.strip()
         self.nome_val = self.nome.value.strip()
-        view = RecrutadorSelectView(self)
-        await interaction.followup.send("Selecione quem te recrutou:", view=view, ephemeral=True)
+        # Buscar membros com cargos de líder
+        guild = interaction.guild
+        lideres = []
+        for member in guild.members:
+            if tem_cargo(member, CARGO_ADMIN_IDS):
+                lideres.append(member)
+        if not lideres:
+            await interaction.followup.send("❌ Nenhum líder (cargos 00,01,02 ou Gerente) encontrado no servidor. Registro cancelado.", ephemeral=True)
+            return
+        # Construir opções do select
+        options = []
+        for lider in lideres[:25]:
+            options.append(discord.SelectOption(label=lider.display_name, value=str(lider.id), emoji="👤"))
+        view = RecrutadorSelectView(self, options)
+        await interaction.followup.send("Selecione quem te recrutou (apenas líderes):", view=view, ephemeral=True)
 
 class RecrutadorSelectView(View):
-    def __init__(self, modal):
+    def __init__(self, modal, options):
         super().__init__(timeout=120)
         self.modal = modal
-        select = UserSelect(placeholder="Escolha o recrutador (apenas líderes)", min_values=1, max_values=1)
+        select = Select(placeholder="Escolha o recrutador", options=options, min_values=1, max_values=1)
         select.callback = self.select_callback
         self.add_item(select)
 
     async def select_callback(self, interaction: discord.Interaction):
         selected_user_id = int(interaction.data["values"][0])
-        membro = interaction.guild.get_member(selected_user_id)
-        if not membro:
-            await interaction.response.send_message("Usuário não encontrado.", ephemeral=True)
+        recrutador = interaction.guild.get_member(selected_user_id)
+        if not recrutador:
+            await interaction.response.send_message("Recrutador não encontrado.", ephemeral=True)
             return
-        if not tem_cargo(membro, CARGO_ADMIN_IDS):
-            await interaction.response.send_message("Este usuário não é um líder (cargos 00,01,02 ou Gerente). Selecione um líder válido.", ephemeral=True)
-            return
-        recrutador_id = selected_user_id
-        recrutador = membro
         pedido_id = str(int(datetime.now().timestamp()))
         dados["sets_pendentes"][pedido_id] = {
             "solicitante_id": interaction.user.id,
             "solicitante_nome": self.modal.nome_val,
             "id_jogo": self.modal.id_val,
-            "recrutador_id": recrutador_id,
+            "recrutador_id": selected_user_id,
             "recrutador_nome": recrutador.display_name,
             "status": "pendente",
             "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -318,7 +324,7 @@ class RecrutadorSelectView(View):
                 timestamp=datetime.now()
             )
             embed.set_footer(text=f"ID: {pedido_id}")
-            view = AprovarSetView(pedido_id, interaction.user.id, recrutador_id)
+            view = AprovarSetView(pedido_id, interaction.user.id, selected_user_id)
             await canal_registros.send(embed=embed, view=view)
         await interaction.response.send_message("✅ Registro enviado! Aguarde a aprovação.", ephemeral=True)
         self.stop()
@@ -338,7 +344,6 @@ class AprovarSetView(View):
         if not pedido or pedido["status"] != "pendente":
             await interaction.response.send_message("Este pedido já foi processado ou não existe.", ephemeral=True)
             return
-        # Auto‑aprovação: concede o cargo Membro diretamente, sem escolher
         guild = interaction.guild
         membro = guild.get_member(self.solicitante_id)
         if not membro:
@@ -349,7 +354,7 @@ class AprovarSetView(View):
             await interaction.response.send_message("Cargo Membro não encontrado.", ephemeral=True)
             return
         try:
-            # Altera o apelido
+            # Alterar apelido
             nome_registro = pedido["solicitante_nome"]
             id_registro = pedido["id_jogo"]
             novo_nick = f"{nome_registro} [{id_registro}]"
@@ -358,25 +363,25 @@ class AprovarSetView(View):
                     await membro.edit(nick=novo_nick, reason=f"Registro aprovado: {nome_registro} [{id_registro}]")
                 except:
                     pass
-            # Concede o cargo Membro
+            # Conceder cargo
             await membro.add_roles(cargo_membro, reason=f"Registro aprovado por {interaction.user.name}")
             pedido["status"] = "aprovado"
             pedido["aprovado_por"] = interaction.user.id
             pedido["cargo_dado"] = CARGO_MEMBRO_ID
             salvar_dados()
-            # Notifica recrutador
+            # Notificar recrutador
             recrutador = guild.get_member(self.recrutador_id)
             if recrutador:
                 try:
                     await recrutador.send(f"✅ O registro de {membro.mention} foi aprovado por {interaction.user.mention}!")
                 except:
                     pass
-            # Notifica o novo membro
+            # Notificar novo membro
             try:
                 await membro.send(f"✅ Parabéns! Seu registro foi **aprovado** e você recebeu o cargo {cargo_membro.mention}. Seu apelido foi alterado para **{novo_nick}**. Bem-vindo(a)!")
             except:
                 pass
-            # Atualiza o embed no canal de registros
+            # Atualizar embed do canal de registros
             canal_registros = bot.get_channel(CANAL_REGISTROS_SET_ID)
             if canal_registros:
                 embed = discord.Embed(
@@ -412,7 +417,7 @@ class AprovarSetView(View):
         await interaction.message.edit(embed=embed, view=None)
         await interaction.response.send_message("Registro recusado!", ephemeral=True)
 
-# ========= SISTEMA DE LIVES =========
+# ========= SISTEMA DE LIVES (mantido igual) =========
 def extract_platform_from_url(url: str):
     url = url.strip().lower()
     if "twitch.tv" in url:
@@ -1303,7 +1308,7 @@ class BotaoCriarCanalView(View):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:200]}", ephemeral=True)
 
-# ========= SISTEMA DE PEDIDOS COM LOGS =========
+# ========= SISTEMA DE PEDIDOS =========
 class PedidoView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1484,7 +1489,7 @@ async def on_ready():
                     await msg.delete()
             embed_set = discord.Embed(
                 title="📋 REGISTRO",
-                description="Clique no botão abaixo para fazer seu registro.",
+                description="Clique no botão abaixo para fazer seu registro. Você precisará informar seu ID e nome no jogo, e depois selecionar um líder (cargos 00,01,02 ou Gerente) como recrutador.",
                 color=0x2c2f33
             )
             view = View(timeout=None)

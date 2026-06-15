@@ -266,7 +266,7 @@ class ConfirmarResetView(View):
         await interaction.response.send_message("Reset cancelado.", ephemeral=True)
         self.stop()
 
-# ========= SISTEMA DE REGISTRO (sem seleção de recrutador) =========
+# ========= SISTEMA DE REGISTRO (sem seleção de recrutador e com resposta correta) =========
 class SolicitarSetModal(Modal, title="📋 Registro"):
     id_jogo = TextInput(label="Seu ID", placeholder="Digite seu ID", required=True)
     nome = TextInput(label="Seu nome no jogo", placeholder="Digite seu nome no jogo", required=True)
@@ -294,7 +294,8 @@ class SolicitarSetModal(Modal, title="📋 Registro"):
             embed.set_footer(text=f"ID: {pedido_id}")
             view = AprovarSetView(pedido_id, interaction.user.id)
             await canal_registros.send(embed=embed, view=view)
-        await interaction.response.send_message("✅ Registro enviado! Aguarde a aprovação.", ephemeral=True)
+        # Usar followup porque já usamos defer
+        await interaction.followup.send("✅ Registro enviado! Aguarde a aprovação.", ephemeral=True)
 
 class AprovarSetView(View):
     def __init__(self, pedido_id, solicitante_id):

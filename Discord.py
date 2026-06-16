@@ -939,30 +939,27 @@ async def restaurar_canais_farms():
                     )
                     await canal.send(embed=embed, view=view)
 
-# ========= MODAL DE FARM PRODUTOS (5 CAMPOS) =========
+# ========= MODAL DE FARM PRODUTOS (5 PRODUTOS, SEM SLOT) =========
 class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
-    slot = TextInput(label="SLOT (número)", placeholder="Ex: 1, 2, 3...", required=True)
     relogio = TextInput(label="RELÓGIO DE LUXO - Quantidade", placeholder="Ex: 5", required=False)
     obra = TextInput(label="OBRA DE ARTE - Quantidade", placeholder="Ex: 2", required=False)
     bebida = TextInput(label="BEBIDA IMPORTADA - Quantidade", placeholder="Ex: 10", required=False)
     acoes = TextInput(label="AÇÕES DE EMPRESA - Quantidade", placeholder="Ex: 100", required=False)
+    nft = TextInput(label="CARTEIRA NFT - Quantidade", placeholder="Ex: 1", required=False)
 
-    def __init__(self, user_id, user_name, canal, edit_mode=False, farm_index=None):
+    def __init__(self, user_id, user_name, canal, slot_num, edit_mode=False, farm_index=None):
         super().__init__()
         self.user_id = user_id
         self.user_name = user_name
         self.canal = canal
+        self.slot_num = slot_num
         self.edit_mode = edit_mode
         self.farm_index = farm_index
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
-        slot_num = self.slot.value.strip()
-        if not slot_num.isdigit():
-            await interaction.followup.send("Slot deve ser um número!", ephemeral=True)
-            return
         produtos = []
-        for campo, nome in [(self.relogio, "RELÓGIO DE LUXO"), (self.obra, "OBRA DE ARTE"), (self.bebida, "BEBIDA IMPORTADA"), (self.acoes, "AÇÕES DE EMPRESA")]:
+        for campo, nome in [(self.relogio, "RELÓGIO DE LUXO"), (self.obra, "OBRA DE ARTE"), (self.bebida, "BEBIDA IMPORTADA"), (self.acoes, "AÇÕES DE EMPRESA"), (self.nft, "CARTEIRA NFT")]:
             if campo.value and campo.value.strip():
                 try:
                     qtd = int(campo.value.strip())
@@ -994,26 +991,26 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
                 return
             dados["usuarios"][str(self.user_id)]["farms"][self.farm_index] = {
                 "produtos": produtos,
-                "slot": int(slot_num),
+                "slot": self.slot_num,
                 "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "print_url": imagem_url,
                 "validado": True,
                 "farm_id": dados["usuarios"][str(self.user_id)]["farms"][self.farm_index].get("farm_id", self.farm_index + 1)
             }
             salvar_dados()
-            embed = discord.Embed(title="✏️ FARM PRODUTOS EDITADA", description=f"**Usuário:** <@{self.user_id}>\n**Slot:** {slot_num}\n", color=0x99aab5)
+            embed = discord.Embed(title="✏️ FARM PRODUTOS EDITADA", description=f"**Usuário:** <@{self.user_id}>\n**Slot:** {self.slot_num}\n", color=0x99aab5)
             desc = "".join(f"🔹 **{p['produto']}:** {p['quantidade']} itens\n" for p in produtos)
             embed.description += desc
             embed.add_field(name="📅 Data da edição", value=datetime.now().strftime("%d/%m/%Y às %H:%M"), inline=False)
             embed.set_image(url=imagem_url)
             await self.canal.send(embed=embed)
-            await log_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: <@{self.user_id}>\nSlot: {slot_num}\nProdutos: {desc}", 0x99aab5, thumbnail=interaction.user.display_avatar.url)
-            await log_admin_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {slot_num}", 0x99aab5)
+            await log_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: <@{self.user_id}>\nSlot: {self.slot_num}\nProdutos: {desc}", 0x99aab5, thumbnail=interaction.user.display_avatar.url)
+            await log_admin_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {self.slot_num}", 0x99aab5)
             await interaction.followup.send("Farm editada com sucesso!", ephemeral=True)
         else:
             registro = {
                 "produtos": produtos,
-                "slot": int(slot_num),
+                "slot": self.slot_num,
                 "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "print_url": imagem_url,
                 "validado": True,
@@ -1021,7 +1018,7 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             }
             dados["usuarios"][str(self.user_id)]["farms"].append(registro)
             salvar_dados()
-            embed = discord.Embed(title="✅ FARM PRODUTOS REGISTRADA", description=f"**Usuário:** <@{self.user_id}>\n**Slot:** {slot_num}\n", color=0x2c2f33)
+            embed = discord.Embed(title="✅ FARM PRODUTOS REGISTRADA", description=f"**Usuário:** <@{self.user_id}>\n**Slot:** {self.slot_num}\n", color=0x2c2f33)
             desc = "".join(f"🔹 **{p['produto']}:** {p['quantidade']} itens\n" for p in produtos)
             embed.description += desc
             embed.add_field(name="📅 Data", value=datetime.now().strftime("%d/%m/%Y às %H:%M"), inline=False)
@@ -1029,8 +1026,8 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             embed.set_image(url=imagem_url)
             embed.set_footer(text=f"Farm ID: {registro['farm_id']}")
             await self.canal.send(embed=embed)
-            await log_embed("📦 FARM PRODUTOS REGISTRADA", f"Usuário: <@{self.user_id}>\nSlot: {slot_num}\nProdutos: {desc}", 0x2c2f33, thumbnail=interaction.user.display_avatar.url)
-            await log_admin_embed("📦 NOVA FARM PRODUTOS", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {slot_num}", 0x2c2f33)
+            await log_embed("📦 FARM PRODUTOS REGISTRADA", f"Usuário: <@{self.user_id}>\nSlot: {self.slot_num}\nProdutos: {desc}", 0x2c2f33, thumbnail=interaction.user.display_avatar.url)
+            await log_admin_embed("📦 NOVA FARM PRODUTOS", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {self.slot_num}", 0x2c2f33)
             await interaction.followup.send("Farm registrada com sucesso!", ephemeral=True)
         await atualizar_ranking()
 
@@ -1119,7 +1116,7 @@ class SelecionarMembroView(View):
         await atualizar_ranking()
         self.stop()
 
-# ========= VIEW DO CANAL PRIVADO =========
+# ========= VIEW DO CANAL PRIVADO (COM FUNÇÃO CORRIGIDA) =========
 class FarmChannelView(View):
     def __init__(self, user_id, user_name, canal_id):
         super().__init__(timeout=None)
@@ -1157,7 +1154,27 @@ class FarmChannelView(View):
         if interaction.user.id != self.user_id and not is_admin(interaction.user):
             await interaction.response.send_message("Apenas o dono do canal ou administradores podem depositar farm!", ephemeral=True)
             return
-        await interaction.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel))
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.followup.send("📝 Digite o **número do SLOT** no chat.", ephemeral=False)
+        
+        def check_slot(m):
+            return m.author == interaction.user and m.channel == interaction.channel and m.content.strip().isdigit()
+        try:
+            msg_slot = await bot.wait_for('message', timeout=60.0, check=check_slot)
+            slot_num = int(msg_slot.content.strip())
+            await msg_slot.delete()
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Tempo esgotado! Operação cancelada.", ephemeral=True)
+            return
+        
+        # Criar botão para abrir o modal
+        view = View(timeout=60)
+        open_modal_btn = Button(label="📦 Abrir Formulário", style=discord.ButtonStyle.success, emoji="📦")
+        async def modal_callback(interaction_btn):
+            await interaction_btn.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel, slot_num))
+        open_modal_btn.callback = modal_callback
+        view.add_item(open_modal_btn)
+        await interaction.followup.send("✅ Slot registrado! Clique no botão abaixo para abrir o formulário e preencher os produtos:", view=view, ephemeral=True)
 
     async def dinheiro_sujo_admin_callback(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -1188,13 +1205,13 @@ class FarmChannelView(View):
         async def select_callback(interaction_select):
             idx = int(interaction_select.data["values"][0])
             farm = farms[idx]
-            modal = FarmProdutosModal(self.user_id, self.user_name, interaction.channel, edit_mode=True, farm_index=idx)
-            modal.slot.default = str(farm.get("slot", ""))
+            modal = FarmProdutosModal(self.user_id, self.user_name, interaction.channel, farm.get("slot", 0), edit_mode=True, farm_index=idx)
             produtos_dict = {p["produto"]: p["quantidade"] for p in farm["produtos"]}
             modal.relogio.default = str(produtos_dict.get("RELÓGIO DE LUXO", ""))
             modal.obra.default = str(produtos_dict.get("OBRA DE ARTE", ""))
             modal.bebida.default = str(produtos_dict.get("BEBIDA IMPORTADA", ""))
             modal.acoes.default = str(produtos_dict.get("AÇÕES DE EMPRESA", ""))
+            modal.nft.default = str(produtos_dict.get("CARTEIRA NFT", ""))
             await interaction_select.response.send_modal(modal)
         select.callback = select_callback
         await interaction.response.send_message("Selecione a farm que deseja editar:", view=view, ephemeral=True)

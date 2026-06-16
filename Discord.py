@@ -919,7 +919,7 @@ class CompraVendaView(View):
     async def compra(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(CompraModal())
 
-# ========= RESTAURAÇÃO DE CANAIS DE FARM =========
+# ========= RESTAURAÇÃO DE CANAIS DE FARM (CORRIGIDA) =========
 async def restaurar_canais_farms():
     for user_id_str, canal_id in dados["canais"].items():
         canal = bot.get_channel(canal_id)
@@ -928,14 +928,13 @@ async def restaurar_canais_farms():
                 if msg.author == bot.user and msg.components:
                     break
             else:
-                user_id = int(user_id_str)
-                user = bot.get_user(user_id) or await bot.fetch_user(user_id)
-                if user:
-                    admin = is_admin(user)
-                    view = FarmChannelView(user_id, user.name, canal.id, is_admin=admin)
+                guild = canal.guild
+                member = guild.get_member(int(user_id_str)) if guild else None
+                if member:
+                    view = FarmChannelView(member.id, member.display_name, canal.id)
                     embed = discord.Embed(
                         title="📦 SEU CANAL PRIVADO",
-                        description=f"Bem-vindo(a) {user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Farm Produtos" + ("" if not admin else "\n💰 Registrar Dinheiro Sujo (Admin)\n✏️ Editar Registro\n📋 Meus Registros\n📊 Fechar Caixa\n🔄 Reset Semanal\n🗑️ Fechar Canal"),
+                        description=f"Bem-vindo(a) {member.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Farm Produtos\n💰 Registrar Dinheiro Sujo (Admin)\n✏️ Editar Registro\n📋 Meus Registros\n📊 Fechar Caixa\n🔄 Reset Semanal\n🗑️ Fechar Canal",
                         color=0x2c2f33
                     )
                     await canal.send(embed=embed, view=view)
@@ -1047,7 +1046,7 @@ class DinheiroSujoAdminModal(Modal, title="💰 Registrar Dinheiro Sujo (Admin)"
         self.canal = canal
 
     async def on_submit(self, interaction: discord.Interaction):
-        if not pode_registrar_acao(interaction.user):
+        if not is_admin(interaction.user):
             await interaction.response.send_message("Você não tem permissão para registrar dinheiro sujo.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1121,51 +1120,48 @@ class SelecionarMembroView(View):
         await atualizar_ranking()
         self.stop()
 
-# ========= VIEW DO CANAL PRIVADO (CORRIGIDA - SEM DECORATORS, APENAS CALLBACKS) =========
+# ========= VIEW DO CANAL PRIVADO (COM TODOS OS BOTÕES, PERMISSÕES NOS CALLBACKS) =========
 class FarmChannelView(View):
-    def __init__(self, user_id, user_name, canal_id, is_admin=False):
+    def __init__(self, user_id, user_name, canal_id):
         super().__init__(timeout=None)
         self.user_id = user_id
         self.user_name = user_name
         self.canal_id = canal_id
-        self.is_admin = is_admin
         self._add_buttons()
 
     def _add_buttons(self):
-        # Botão Farm Produtos (sempre visível)
+        # Todos os botões são adicionados, mas apenas admins podem usá-los
         farm_btn = Button(label="Farm Produtos", style=discord.ButtonStyle.secondary, emoji="📦", row=0, custom_id="farm_produtos")
         farm_btn.callback = self.farm_produtos_callback
         self.add_item(farm_btn)
 
-        if self.is_admin:
-            # Admin buttons - distribuídos em rows para não exceder 5 por linha
-            dinheiro_btn = Button(label="Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0, custom_id="dinheiro_sujo_admin")
-            dinheiro_btn.callback = self.dinheiro_sujo_admin_callback
-            self.add_item(dinheiro_btn)
+        dinheiro_btn = Button(label="Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0, custom_id="dinheiro_sujo_admin")
+        dinheiro_btn.callback = self.dinheiro_sujo_admin_callback
+        self.add_item(dinheiro_btn)
 
-            editar_btn = Button(label="Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", row=0, custom_id="editar_registro")
-            editar_btn.callback = self.editar_registro_callback
-            self.add_item(editar_btn)
+        editar_btn = Button(label="Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", row=0, custom_id="editar_registro")
+        editar_btn.callback = self.editar_registro_callback
+        self.add_item(editar_btn)
 
-            fechar_caixa_btn = Button(label="Fechar Caixa", style=discord.ButtonStyle.secondary, emoji="📊", row=1, custom_id="fechar_caixa")
-            fechar_caixa_btn.callback = self.fechar_caixa_callback
-            self.add_item(fechar_caixa_btn)
+        fechar_caixa_btn = Button(label="Fechar Caixa", style=discord.ButtonStyle.secondary, emoji="📊", row=1, custom_id="fechar_caixa")
+        fechar_caixa_btn.callback = self.fechar_caixa_callback
+        self.add_item(fechar_caixa_btn)
 
-            meus_registros_btn = Button(label="Meus Registros", style=discord.ButtonStyle.primary, emoji="📋", row=2, custom_id="meus_registros")
-            meus_registros_btn.callback = self.meus_registros_callback
-            self.add_item(meus_registros_btn)
+        meus_registros_btn = Button(label="Meus Registros", style=discord.ButtonStyle.primary, emoji="📋", row=2, custom_id="meus_registros")
+        meus_registros_btn.callback = self.meus_registros_callback
+        self.add_item(meus_registros_btn)
 
-            reset_btn = Button(label="Reset Semanal", style=discord.ButtonStyle.danger, emoji="🔄", row=2, custom_id="reset_semanal")
-            reset_btn.callback = self.reset_semanal_callback
-            self.add_item(reset_btn)
+        reset_btn = Button(label="Reset Semanal", style=discord.ButtonStyle.danger, emoji="🔄", row=2, custom_id="reset_semanal")
+        reset_btn.callback = self.reset_semanal_callback
+        self.add_item(reset_btn)
 
-            fechar_canal_btn = Button(label="Fechar Canal", style=discord.ButtonStyle.danger, emoji="🗑️", row=2, custom_id="fechar_canal")
-            fechar_canal_btn.callback = self.fechar_canal_callback
-            self.add_item(fechar_canal_btn)
+        fechar_canal_btn = Button(label="Fechar Canal", style=discord.ButtonStyle.danger, emoji="🗑️", row=2, custom_id="fechar_canal")
+        fechar_canal_btn.callback = self.fechar_canal_callback
+        self.add_item(fechar_canal_btn)
 
     async def farm_produtos_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id and not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas o dono do canal pode registrar farm!", ephemeral=True)
+            await interaction.response.send_message("Apenas o dono do canal ou administradores podem registrar farm!", ephemeral=True)
             return
         await interaction.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel))
 
@@ -1339,11 +1335,10 @@ class BotaoCriarCanalView(View):
             canal = await categoria.create_text_channel(nome_canal, overwrites=overwrites)
             dados["canais"][user_id] = canal.id
             salvar_dados()
-            admin = is_admin(interaction.user)
-            view = FarmChannelView(interaction.user.id, interaction.user.name, canal.id, is_admin=admin)
+            view = FarmChannelView(interaction.user.id, interaction.user.name, canal.id)
             embed = discord.Embed(
                 title="📦 SEU CANAL PRIVADO",
-                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Farm Produtos" + ("" if not admin else "\n💰 Registrar Dinheiro Sujo (Admin)\n✏️ Editar Registro\n📋 Meus Registros\n📊 Fechar Caixa\n🔄 Reset Semanal\n🗑️ Fechar Canal"),
+                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Farm Produtos\n💰 Registrar Dinheiro Sujo (Admin)\n✏️ Editar Registro\n📋 Meus Registros\n📊 Fechar Caixa\n🔄 Reset Semanal\n🗑️ Fechar Canal",
                 color=0x2c2f33
             )
             await canal.send(embed=embed, view=view)
@@ -1627,7 +1622,7 @@ async def on_ready():
     live_check_loop.start()
 
     for guild in bot.guilds:
-        # Painel criar canal (agora no canal fixo CANAL_CRIAR_FARM_ID)
+        # Painel criar canal
         canal_criar = guild.get_channel(CANAL_CRIAR_FARM_ID)
         if canal_criar:
             async for msg in canal_criar.history(limit=5):

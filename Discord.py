@@ -37,7 +37,10 @@ CANAL_LIVES_PAINEL_ID = 1515937074359046235
 CANAL_COMPRA_VENDA_ID = 1515937419395072030
 CANAL_COMPRA_VENDA_LOGS_ID = 1515937452802572318
 CANAL_RESERVAS_FUNC_PAINEL_ID = 1516449109060489466
-CANAL_RESERVAS_FUNC_LOGS_ID = 1516449158796542013
+CANAL_RESERVAS_FUNC_LOGS_ID = 1516460988541571212  # NOVO ID
+
+# NOVO: Painel de criar a Farm (canal fixo onde ficará o botão "Criar Meu Canal Privado")
+CANAL_CRIAR_FARM_ID = 1516460981516242976
 
 CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
 CARGO_REMOVER_MEMBRO_IDS = CARGO_ADMIN_IDS
@@ -1121,7 +1124,7 @@ class SelecionarMembroView(View):
         await atualizar_ranking()
         self.stop()
 
-# ========= VIEW DO CANAL PRIVADO (sem Mudar Nome e Histórico Caixa) =========
+# ========= VIEW DO CANAL PRIVADO =========
 class FarmChannelView(View):
     def __init__(self, user_id, user_name, canal_id, is_admin=False):
         super().__init__(timeout=None)
@@ -1177,7 +1180,6 @@ class FarmChannelView(View):
         if not farms:
             await interaction.response.send_message("Este usuário não possui registros para editar.", ephemeral=True)
             return
-        # Criar um select com as farms
         options = []
         for idx, farm in enumerate(farms):
             farm_id = farm.get("farm_id", idx + 1)
@@ -1193,7 +1195,6 @@ class FarmChannelView(View):
             idx = int(interaction_select.data["values"][0])
             farm = farms[idx]
             modal = FarmProdutosModal(self.user_id, self.user_name, interaction.channel, edit_mode=True, farm_index=idx)
-            # Preencher defaults
             modal.slot.default = str(farm.get("slot", ""))
             produtos_dict = {p["produto"]: p["quantidade"] for p in farm["produtos"]}
             modal.relogio.default = str(produtos_dict.get("RELÓGIO DE LUXO", ""))
@@ -1626,12 +1627,9 @@ async def on_ready():
     live_check_loop.start()
 
     for guild in bot.guilds:
-        # Painel criar canal
-        categoria_painel = guild.get_channel(CATEGORIA_PAINEL_ID)
-        if categoria_painel:
-            canal_criar = discord.utils.get(categoria_painel.channels, name="criar-canal")
-            if not canal_criar:
-                canal_criar = await categoria_painel.create_text_channel("criar-canal")
+        # Painel criar canal (agora no canal fixo CANAL_CRIAR_FARM_ID)
+        canal_criar = guild.get_channel(CANAL_CRIAR_FARM_ID)
+        if canal_criar:
             async for msg in canal_criar.history(limit=5):
                 if msg.author == bot.user:
                     await msg.delete()

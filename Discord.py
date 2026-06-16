@@ -51,7 +51,7 @@ dados = {
     "usuarios_banidos": [],
     "sets_pendentes": {},
     "pedidos": {
-        "config": {"porcentagens": {"cliente": 50, "maquina": 40, "fac": 5, "membros": 5}, "ultima_edicao": None},
+        "config": {"porcentagens": {"cliente": 50, "maquina": 40, "fac": 5, "membros": 5, "vip_fac": 10}, "ultima_edicao": None},
         "lista": []
     },
     "lives": {
@@ -73,11 +73,14 @@ def carregar_dados():
             loaded = json.load(f)
             dados.update(loaded)
             if "pedidos" not in dados:
-                dados["pedidos"] = {"config": {"porcentagens": {"cliente": 50, "maquina": 40, "fac": 5, "membros": 5}, "ultima_edicao": None}, "lista": []}
+                dados["pedidos"] = {"config": {"porcentagens": {"cliente": 50, "maquina": 40, "fac": 5, "membros": 5, "vip_fac": 10}, "ultima_edicao": None}, "lista": []}
             if "lives" not in dados:
                 dados["lives"] = {"config": {}, "streamers": {}, "last_notified": {}, "status": {}}
             if "compras_vendas" not in dados:
                 dados["compras_vendas"] = []
+            # Garantir que a chave vip_fac exista
+            if "vip_fac" not in dados["pedidos"]["config"]["porcentagens"]:
+                dados["pedidos"]["config"]["porcentagens"]["vip_fac"] = 10
         return True
     except:
         return False
@@ -1276,8 +1279,8 @@ class BotaoCriarCanalView(View):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:200]}", ephemeral=True)
 
-# ========= SISTEMA DE RESERVAS (antigo Pedidos) =========
-class ReservaView(View):  # mantive nome da classe para evitar conflitos, mas visualmente alterado
+# ========= SISTEMA DE RESERVAS (com VIP Fac) =========
+class ReservaView(View):
     def __init__(self):
         super().__init__(timeout=None)
     @discord.ui.button(label="💸 Nova reserva", style=discord.ButtonStyle.success, emoji="💸")
@@ -1310,9 +1313,11 @@ class NovaReservaModal(Modal, title="💸 Nova Reserva"):
             await interaction.followup.send("Descontado deve ser Sim, Não ou Pendente.", ephemeral=True)
             return
         pcts = dados["pedidos"]["config"]["porcentagens"]
+        vip = pcts.get("vip_fac", 0)
+        fac_percent = pcts["fac"] + vip
         cliente_part = valor * pcts["cliente"] / 100
         maquina_part = valor * pcts["maquina"] / 100
-        fac_part = valor * pcts["fac"] / 100
+        fac_part = valor * fac_percent / 100
         membros_part = valor * pcts["membros"] / 100
         reserva = {
             "id": len(dados["pedidos"]["lista"]) + 1,
@@ -1322,7 +1327,7 @@ class NovaReservaModal(Modal, title="💸 Nova Reserva"):
             "descontado_caixa": descontado,
             "data_criacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "criado_por": interaction.user.id,
-            "distribuicao": {"cliente": cliente_part, "maquina": maquina_part, "fac": fac_part, "membros": membros_part},
+            "distribuicao": {"cliente": cliente_part, "maquina": maquina_part, "fac": fac_part, "membros": membros_part, "vip_fac": vip},
             "pago": False
         }
         dados["pedidos"]["lista"].append(reserva)
@@ -1332,7 +1337,8 @@ class NovaReservaModal(Modal, title="💸 Nova Reserva"):
         embed.add_field(name="Valor Total", value=f"R$ {valor:,.2f}", inline=True)
         embed.add_field(name="Prazo", value=reserva["prazo_entrega"], inline=True)
         embed.add_field(name="Descontado", value=descontado, inline=True)
-        embed.add_field(name="Distribuição", value=f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({pcts['fac']}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)", inline=False)
+        distrib = f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({fac_percent}% incluindo VIP {vip}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)"
+        embed.add_field(name="Distribuição", value=distrib, inline=False)
         embed.set_footer(text=f"Reserva #{reserva['id']} - Criado por {interaction.user.name}")
         await interaction.followup.send(embed=embed, ephemeral=True)
         await log_pedido_embed(
@@ -1344,16 +1350,17 @@ class NovaReservaModal(Modal, title="💸 Nova Reserva"):
                 ("Valor Total", f"R$ {valor:,.2f}", True),
                 ("Prazo", reserva["prazo_entrega"], True),
                 ("Descontado", descontado, True),
-                ("Distribuição", f"Cliente: R$ {cliente_part:,.2f}\nMáquina: R$ {maquina_part:,.2f}\nFacção: R$ {fac_part:,.2f}\nMembros: R$ {membros_part:,.2f}", False)
+                ("Distribuição", f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({fac_percent}% incluindo VIP {vip}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)", False)
             ]
         )
         await log_admin_embed("💸 NOVA RESERVA", f"Reserva #{reserva['id']} criada por {interaction.user.mention}", 0x2c2f33)
 
-class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens"):
+class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens e VIP"):
     cliente = TextInput(label="% Cliente", default="50", required=True)
     maquina = TextInput(label="% Máquina", default="40", required=True)
     fac = TextInput(label="% Facção", default="5", required=True)
     membros = TextInput(label="% Membros", default="5", required=True)
+    vip_fac = TextInput(label="% VIP Fac (bônus)", default="10", required=True)
     async def on_submit(self, interaction: discord.Interaction):
         if not pode_registrar_acao(interaction.user):
             await interaction.response.send_message("Sem permissão.", ephemeral=True)
@@ -1363,15 +1370,15 @@ class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens"):
                 "cliente": float(self.cliente.value.replace(",", ".")),
                 "maquina": float(self.maquina.value.replace(",", ".")),
                 "fac": float(self.fac.value.replace(",", ".")),
-                "membros": float(self.membros.value.replace(",", "."))
+                "membros": float(self.membros.value.replace(",", ".")),
+                "vip_fac": float(self.vip_fac.value.replace(",", "."))
             }
-            if abs(sum(pcts.values()) - 100) > 0.01:
-                await interaction.response.send_message("A soma deve ser 100%", ephemeral=True)
-                return
+            # Não exigimos que a soma seja 100% porque o VIP pode ser adicionado
             dados["pedidos"]["config"]["porcentagens"] = pcts
             dados["pedidos"]["config"]["ultima_edicao"] = {"por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             salvar_dados()
-            await interaction.response.send_message("Porcentagens atualizadas!", ephemeral=True)
+            total = pcts["cliente"] + pcts["maquina"] + pcts["fac"] + pcts["membros"] + pcts["vip_fac"]
+            await interaction.response.send_message(f"✅ Porcentagens atualizadas!\nCliente {pcts['cliente']}% | Máquina {pcts['maquina']}% | Facção {pcts['fac']}% | Membros {pcts['membros']}% | VIP Fac {pcts['vip_fac']}% (total {total}%)", ephemeral=True)
             await log_pedido_embed(
                 "⚙️ PORCENTAGENS EDITADAS",
                 f"Porcentagens editadas por {interaction.user.mention}",
@@ -1381,12 +1388,13 @@ class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens"):
                     ("Máquina", f"{pcts['maquina']}%", True),
                     ("Facção", f"{pcts['fac']}%", True),
                     ("Membros", f"{pcts['membros']}%", True),
-                    ("Total", "100%", True)
+                    ("VIP Fac", f"{pcts['vip_fac']}%", True),
+                    ("Total", f"{total}%", True)
                 ]
             )
-            await log_admin_embed("⚙️ PORCENTAGENS EDITADAS", f"Novas porcentagens: Cliente {pcts['cliente']}%, Máquina {pcts['maquina']}%, Facção {pcts['fac']}%, Membros {pcts['membros']}%", 0x2c2f33)
-        except:
-            await interaction.response.send_message("Valores inválidos.", ephemeral=True)
+            await log_admin_embed("⚙️ PORCENTAGENS EDITADAS", f"Novas porcentagens: Cliente {pcts['cliente']}%, Máquina {pcts['maquina']}%, Facção {pcts['fac']}%, Membros {pcts['membros']}%, VIP Fac {pcts['vip_fac']}%", 0x2c2f33)
+        except ValueError:
+            await interaction.response.send_message("Valores inválidos. Use números.", ephemeral=True)
 
 # ========= REMOÇÃO DE MEMBRO =========
 class RemoverUsuarioModal(Modal, title="🗑️ Remover Usuário"):
@@ -1479,7 +1487,7 @@ async def on_ready():
                     await msg.delete()
             embed_reservas = discord.Embed(
                 title="💸 SISTEMA DE RESERVAS",
-                description="Gerencie reserva de clientes.\n\n**Botões:**\n💸 Nova reserva\n⚙️ Editar Porcentagens",
+                description="Gerencie reserva de clientes.\n\n**Botões:**\n💸 Nova reserva\n⚙️ Editar Porcentagens (inclui VIP Fac)",
                 color=0x2c2f33
             )
             await canal_reservas.send(embed=embed_reservas, view=ReservaView())

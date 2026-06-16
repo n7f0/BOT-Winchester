@@ -37,9 +37,8 @@ CANAL_LIVES_PAINEL_ID = 1515937074359046235
 CANAL_COMPRA_VENDA_ID = 1515937419395072030
 CANAL_COMPRA_VENDA_LOGS_ID = 1515937452802572318
 CANAL_RESERVAS_FUNC_PAINEL_ID = 1516449109060489466
-CANAL_RESERVAS_FUNC_LOGS_ID = 1516460988541571212  # NOVO ID
+CANAL_RESERVAS_FUNC_LOGS_ID = 1516460988541571212
 
-# NOVO: Painel de criar a Farm (canal fixo onde ficará o botão "Criar Meu Canal Privado")
 CANAL_CRIAR_FARM_ID = 1516460981516242976
 
 CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
@@ -992,7 +991,6 @@ class FarmProdutosModal(Modal, title="📦 Farm Produtos"):
             dados["usuarios"][str(self.user_id)] = {"farms": [], "pagamentos": [], "nome": self.user_name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
 
         if self.edit_mode and self.farm_index is not None:
-            # Editar registro existente
             if self.farm_index >= len(dados["usuarios"][str(self.user_id)]["farms"]):
                 await interaction.followup.send("Registro não encontrado.", ephemeral=True)
                 return
@@ -1015,7 +1013,6 @@ class FarmProdutosModal(Modal, title="📦 Farm Produtos"):
             await log_admin_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {slot_num}", 0x99aab5)
             await interaction.followup.send("Farm editada com sucesso!", ephemeral=True)
         else:
-            # Nova farm
             registro = {
                 "produtos": produtos,
                 "slot": int(slot_num),
@@ -1124,7 +1121,7 @@ class SelecionarMembroView(View):
         await atualizar_ranking()
         self.stop()
 
-# ========= VIEW DO CANAL PRIVADO =========
+# ========= VIEW DO CANAL PRIVADO (CORRIGIDA - SEM DECORATORS, APENAS CALLBACKS) =========
 class FarmChannelView(View):
     def __init__(self, user_id, user_name, canal_id, is_admin=False):
         super().__init__(timeout=None)
@@ -1135,43 +1132,50 @@ class FarmChannelView(View):
         self._add_buttons()
 
     def _add_buttons(self):
-        self.add_item(Button(label="Farm Produtos", style=discord.ButtonStyle.secondary, custom_id="farm_produtos", row=0, emoji="📦"))
+        # Botão Farm Produtos (sempre visível)
+        farm_btn = Button(label="Farm Produtos", style=discord.ButtonStyle.secondary, emoji="📦", row=0, custom_id="farm_produtos")
+        farm_btn.callback = self.farm_produtos_callback
+        self.add_item(farm_btn)
+
         if self.is_admin:
-            self.add_item(Button(label="Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, custom_id="dinheiro_sujo_admin", row=0, emoji="💰"))
-            self.add_item(Button(label="Editar Registro", style=discord.ButtonStyle.secondary, custom_id="editar_registro", row=0, emoji="✏️"))
-            self.add_item(Button(label="Fechar Caixa", style=discord.ButtonStyle.secondary, custom_id="fechar_caixa", row=1, emoji="📊"))
-            self.add_item(Button(label="Meus Registros", style=discord.ButtonStyle.primary, custom_id="meus_registros", row=2, emoji="📋"))
-            self.add_item(Button(label="Reset Semanal", style=discord.ButtonStyle.danger, custom_id="reset_semanal", row=2, emoji="🔄"))
-            self.add_item(Button(label="Fechar Canal", style=discord.ButtonStyle.danger, custom_id="fechar_canal", row=2, emoji="🗑️"))
+            # Admin buttons - distribuídos em rows para não exceder 5 por linha
+            dinheiro_btn = Button(label="Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0, custom_id="dinheiro_sujo_admin")
+            dinheiro_btn.callback = self.dinheiro_sujo_admin_callback
+            self.add_item(dinheiro_btn)
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        custom_id = interaction.data.get("custom_id")
-        if custom_id == "farm_produtos":
-            if interaction.user.id != self.user_id and not is_admin(interaction.user):
-                await interaction.response.send_message("Apenas o dono do canal pode registrar farm!", ephemeral=True)
-                return False
-            return True
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Você não tem permissão para usar este botão.", ephemeral=True)
-            return False
-        return True
+            editar_btn = Button(label="Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", row=0, custom_id="editar_registro")
+            editar_btn.callback = self.editar_registro_callback
+            self.add_item(editar_btn)
 
-    @discord.ui.button(label="Farm Produtos", style=discord.ButtonStyle.secondary, emoji="📦", row=0, custom_id="farm_produtos")
-    async def farm_produtos(self, interaction: discord.Interaction, button: Button):
+            fechar_caixa_btn = Button(label="Fechar Caixa", style=discord.ButtonStyle.secondary, emoji="📊", row=1, custom_id="fechar_caixa")
+            fechar_caixa_btn.callback = self.fechar_caixa_callback
+            self.add_item(fechar_caixa_btn)
+
+            meus_registros_btn = Button(label="Meus Registros", style=discord.ButtonStyle.primary, emoji="📋", row=2, custom_id="meus_registros")
+            meus_registros_btn.callback = self.meus_registros_callback
+            self.add_item(meus_registros_btn)
+
+            reset_btn = Button(label="Reset Semanal", style=discord.ButtonStyle.danger, emoji="🔄", row=2, custom_id="reset_semanal")
+            reset_btn.callback = self.reset_semanal_callback
+            self.add_item(reset_btn)
+
+            fechar_canal_btn = Button(label="Fechar Canal", style=discord.ButtonStyle.danger, emoji="🗑️", row=2, custom_id="fechar_canal")
+            fechar_canal_btn.callback = self.fechar_canal_callback
+            self.add_item(fechar_canal_btn)
+
+    async def farm_produtos_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id and not is_admin(interaction.user):
             await interaction.response.send_message("Apenas o dono do canal pode registrar farm!", ephemeral=True)
             return
         await interaction.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel))
 
-    @discord.ui.button(label="Registrar Dinheiro Sujo (Admin)", style=discord.ButtonStyle.danger, emoji="💰", row=0, custom_id="dinheiro_sujo_admin")
-    async def dinheiro_sujo_admin(self, interaction: discord.Interaction, button: Button):
+    async def dinheiro_sujo_admin_callback(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores podem registrar dinheiro sujo.", ephemeral=True)
             return
         await interaction.response.send_modal(DinheiroSujoAdminModal(self.user_id, self.user_name, interaction.channel))
 
-    @discord.ui.button(label="Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", row=0, custom_id="editar_registro")
-    async def editar_registro(self, interaction: discord.Interaction, button: Button):
+    async def editar_registro_callback(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores.", ephemeral=True)
             return
@@ -1206,15 +1210,13 @@ class FarmChannelView(View):
         select.callback = select_callback
         await interaction.response.send_message("Selecione a farm que deseja editar:", view=view, ephemeral=True)
 
-    @discord.ui.button(label="Fechar Caixa", style=discord.ButtonStyle.secondary, emoji="📊", row=1, custom_id="fechar_caixa")
-    async def fechar_caixa(self, interaction: discord.Interaction, button: Button):
+    async def fechar_caixa_callback(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores.", ephemeral=True)
             return
         await interaction.response.send_message("Função em desenvolvimento. Em breve!", ephemeral=True)
 
-    @discord.ui.button(label="Meus Registros", style=discord.ButtonStyle.primary, emoji="📋", row=2, custom_id="meus_registros")
-    async def meus_registros(self, interaction: discord.Interaction, button: Button):
+    async def meus_registros_callback(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores.", ephemeral=True)
             return
@@ -1229,16 +1231,14 @@ class FarmChannelView(View):
             embed.add_field(name=f"Farm #{farm.get('farm_id','?')} - Slot {farm.get('slot','?')}", value=f"**Produtos:** {produtos_str}\n**Data:** {farm['data']}", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="Reset Semanal", style=discord.ButtonStyle.danger, emoji="🔄", row=2, custom_id="reset_semanal")
-    async def reset_semanal(self, interaction: discord.Interaction, button: Button):
+    async def reset_semanal_callback(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores.", ephemeral=True)
             return
         confirm_view = ConfirmResetSemanalView(self.user_id, self.user_name, interaction.channel)
         await interaction.response.send_message("⚠️ **Tem certeza que deseja resetar a semana?** Isso apagará todos os registros de farm, pagamentos e dinheiro sujo deste usuário.", view=confirm_view, ephemeral=True)
 
-    @discord.ui.button(label="Fechar Canal", style=discord.ButtonStyle.danger, emoji="🗑️", row=2, custom_id="fechar_canal")
-    async def fechar_canal(self, interaction: discord.Interaction, button: Button):
+    async def fechar_canal_callback(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Apenas administradores.", ephemeral=True)
             return

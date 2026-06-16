@@ -1216,7 +1216,7 @@ class MudarNomeModal(Modal, title="✏️ Mudar Nome do Canal"):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:100]}", ephemeral=True)
 
-# ========= BOTÃO CRIAR CANAL (com emoji 📦 e nome baseado no registro) =========
+# ========= BOTÃO CRIAR CANAL =========
 class BotaoCriarCanalView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1276,16 +1276,16 @@ class BotaoCriarCanalView(View):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:200]}", ephemeral=True)
 
-# ========= SISTEMA DE PEDIDOS =========
-class PedidoView(View):
+# ========= SISTEMA DE RESERVAS (antigo Pedidos) =========
+class ReservaView(View):  # mantive nome da classe para evitar conflitos, mas visualmente alterado
     def __init__(self):
         super().__init__(timeout=None)
-    @discord.ui.button(label="📝 Novo Pedido", style=discord.ButtonStyle.success, emoji="📝")
-    async def novo_pedido(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="💸 Nova reserva", style=discord.ButtonStyle.success, emoji="💸")
+    async def nova_reserva(self, interaction: discord.Interaction, button: Button):
         if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem criar pedidos.", ephemeral=True)
+            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem criar reservas.", ephemeral=True)
             return
-        await interaction.response.send_modal(NovoPedidoModal())
+        await interaction.response.send_modal(NovaReservaModal())
     @discord.ui.button(label="⚙️ Editar Porcentagens", style=discord.ButtonStyle.primary, emoji="⚙️")
     async def editar_porcentagens(self, interaction: discord.Interaction, button: Button):
         if not pode_registrar_acao(interaction.user):
@@ -1293,7 +1293,7 @@ class PedidoView(View):
             return
         await interaction.response.send_modal(EditarPorcentagensModal())
 
-class NovoPedidoModal(Modal, title="📝 Novo Pedido"):
+class NovaReservaModal(Modal, title="💸 Nova Reserva"):
     cliente = TextInput(label="Nome do Cliente", required=True)
     valor_total = TextInput(label="Valor Total Sujo (R$)", required=True)
     prazo_entrega = TextInput(label="Prazo de Entrega", required=True)
@@ -1314,7 +1314,7 @@ class NovoPedidoModal(Modal, title="📝 Novo Pedido"):
         maquina_part = valor * pcts["maquina"] / 100
         fac_part = valor * pcts["fac"] / 100
         membros_part = valor * pcts["membros"] / 100
-        pedido = {
+        reserva = {
             "id": len(dados["pedidos"]["lista"]) + 1,
             "cliente": self.cliente.value.strip(),
             "valor_total": valor,
@@ -1325,29 +1325,29 @@ class NovoPedidoModal(Modal, title="📝 Novo Pedido"):
             "distribuicao": {"cliente": cliente_part, "maquina": maquina_part, "fac": fac_part, "membros": membros_part},
             "pago": False
         }
-        dados["pedidos"]["lista"].append(pedido)
+        dados["pedidos"]["lista"].append(reserva)
         salvar_dados()
-        embed = discord.Embed(title="📝 NOVO PEDIDO CRIADO", color=0x2c2f33, timestamp=datetime.now())
-        embed.add_field(name="Cliente", value=pedido["cliente"], inline=True)
+        embed = discord.Embed(title="💸 NOVA RESERVA CRIADA", color=0x2c2f33, timestamp=datetime.now())
+        embed.add_field(name="Cliente", value=reserva["cliente"], inline=True)
         embed.add_field(name="Valor Total", value=f"R$ {valor:,.2f}", inline=True)
-        embed.add_field(name="Prazo", value=pedido["prazo_entrega"], inline=True)
+        embed.add_field(name="Prazo", value=reserva["prazo_entrega"], inline=True)
         embed.add_field(name="Descontado", value=descontado, inline=True)
         embed.add_field(name="Distribuição", value=f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({pcts['fac']}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)", inline=False)
-        embed.set_footer(text=f"Pedido #{pedido['id']} - Criado por {interaction.user.name}")
+        embed.set_footer(text=f"Reserva #{reserva['id']} - Criado por {interaction.user.name}")
         await interaction.followup.send(embed=embed, ephemeral=True)
         await log_pedido_embed(
-            "📝 NOVO PEDIDO",
-            f"Pedido #{pedido['id']} criado por {interaction.user.mention}",
+            "💸 NOVA RESERVA",
+            f"Reserva #{reserva['id']} criada por {interaction.user.mention}",
             0x2c2f33,
             fields=[
-                ("Cliente", pedido["cliente"], True),
+                ("Cliente", reserva["cliente"], True),
                 ("Valor Total", f"R$ {valor:,.2f}", True),
-                ("Prazo", pedido["prazo_entrega"], True),
+                ("Prazo", reserva["prazo_entrega"], True),
                 ("Descontado", descontado, True),
                 ("Distribuição", f"Cliente: R$ {cliente_part:,.2f}\nMáquina: R$ {maquina_part:,.2f}\nFacção: R$ {fac_part:,.2f}\nMembros: R$ {membros_part:,.2f}", False)
             ]
         )
-        await log_admin_embed("📝 NOVO PEDIDO", f"Pedido #{pedido['id']} criado por {interaction.user.mention}", 0x2c2f33)
+        await log_admin_embed("💸 NOVA RESERVA", f"Reserva #{reserva['id']} criada por {interaction.user.mention}", 0x2c2f33)
 
 class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens"):
     cliente = TextInput(label="% Cliente", default="50", required=True)
@@ -1433,7 +1433,7 @@ async def on_ready():
     live_check_loop.start()
 
     for guild in bot.guilds:
-        # Painel criar canal (apenas o botão de criar)
+        # Painel criar canal
         categoria_painel = guild.get_channel(CATEGORIA_PAINEL_ID)
         if categoria_painel:
             canal_criar = discord.utils.get(categoria_painel.channels, name="criar-canal")
@@ -1468,21 +1468,21 @@ async def on_ready():
             view.add_item(button)
             await canal_set.send(embed=embed_set, view=view)
 
-        # Painel Pedidos
-        categoria_pedidos = guild.get_channel(CATEGORIA_PEDIDOS_ID)
-        if categoria_pedidos:
-            canal_pedidos = discord.utils.get(categoria_pedidos.channels, name="pedidos")
-            if not canal_pedidos:
-                canal_pedidos = await categoria_pedidos.create_text_channel("pedidos")
-            async for msg in canal_pedidos.history(limit=5):
+        # Painel de Reservas (antigo Pedidos)
+        categoria_reservas = guild.get_channel(CATEGORIA_PEDIDOS_ID)
+        if categoria_reservas:
+            canal_reservas = discord.utils.get(categoria_reservas.channels, name="reservas")
+            if not canal_reservas:
+                canal_reservas = await categoria_reservas.create_text_channel("reservas")
+            async for msg in canal_reservas.history(limit=5):
                 if msg.author == bot.user:
                     await msg.delete()
-            embed_pedidos = discord.Embed(
-                title="📦 SISTEMA DE PEDIDOS",
-                description="Gerencie pedidos de clientes.\n\n**Botões:**\n📝 Novo Pedido\n⚙️ Editar Porcentagens",
+            embed_reservas = discord.Embed(
+                title="💸 SISTEMA DE RESERVAS",
+                description="Gerencie reserva de clientes.\n\n**Botões:**\n💸 Nova reserva\n⚙️ Editar Porcentagens",
                 color=0x2c2f33
             )
-            await canal_pedidos.send(embed=embed_pedidos, view=PedidoView())
+            await canal_reservas.send(embed=embed_reservas, view=ReservaView())
 
         # Painel de Lives
         canal_lives = guild.get_channel(CANAL_LIVES_PAINEL_ID)
@@ -1509,7 +1509,7 @@ async def on_ready():
 
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Pedidos, Lives, Compra/Venda.", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Reservas, Lives, Compra/Venda.", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

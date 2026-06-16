@@ -37,6 +37,10 @@ CANAL_LIVES_PAINEL_ID = 1515937074359046235
 CANAL_COMPRA_VENDA_ID = 1515937419395072030
 CANAL_COMPRA_VENDA_LOGS_ID = 1515937452802572318
 
+# NOVOS CANAIS PARA RESERVAS FUNCIONÁRIOS
+CANAL_RESERVAS_FUNC_PAINEL_ID = 1516449109060489466
+CANAL_RESERVAS_FUNC_LOGS_ID = 1516449158796542013
+
 CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
 CARGO_REMOVER_MEMBRO_IDS = CARGO_ADMIN_IDS
 
@@ -52,6 +56,11 @@ dados = {
     "sets_pendentes": {},
     "pedidos": {
         "config": {"porcentagens": {"cliente": 50, "maquina": 40, "fac": 5, "membros": 5, "vip_fac": 10}, "ultima_edicao": None},
+        "lista": []
+    },
+    # NOVO: reservas para funcionários
+    "pedidos_funcionarios": {
+        "config": {"porcentagens": {"funcionario": 50, "maquina": 40, "fac": 5, "vip_fac": 10}, "ultima_edicao": None},
         "lista": []
     },
     "lives": {
@@ -74,13 +83,17 @@ def carregar_dados():
             dados.update(loaded)
             if "pedidos" not in dados:
                 dados["pedidos"] = {"config": {"porcentagens": {"cliente": 50, "maquina": 40, "fac": 5, "membros": 5, "vip_fac": 10}, "ultima_edicao": None}, "lista": []}
+            if "pedidos_funcionarios" not in dados:
+                dados["pedidos_funcionarios"] = {"config": {"porcentagens": {"funcionario": 50, "maquina": 40, "fac": 5, "vip_fac": 10}, "ultima_edicao": None}, "lista": []}
             if "lives" not in dados:
                 dados["lives"] = {"config": {}, "streamers": {}, "last_notified": {}, "status": {}}
             if "compras_vendas" not in dados:
                 dados["compras_vendas"] = []
-            # Garantir que a chave vip_fac exista
+            # Garantir chaves
             if "vip_fac" not in dados["pedidos"]["config"]["porcentagens"]:
                 dados["pedidos"]["config"]["porcentagens"]["vip_fac"] = 10
+            if "vip_fac" not in dados["pedidos_funcionarios"]["config"]["porcentagens"]:
+                dados["pedidos_funcionarios"]["config"]["porcentagens"]["vip_fac"] = 10
         return True
     except:
         return False
@@ -109,6 +122,16 @@ async def log_admin_embed(titulo, descricao, cor, thumbnail=None, fields=None):
 
 async def log_pedido_embed(titulo, descricao, cor, fields=None):
     canal = bot.get_channel(CHAT_PEDIDOS_LOG_ID)
+    if canal:
+        embed = discord.Embed(title=titulo, description=descricao, color=cor, timestamp=datetime.now())
+        if fields:
+            for name, value, inline in fields:
+                embed.add_field(name=name, value=value, inline=inline)
+        await canal.send(embed=embed)
+
+async def log_reserva_func_embed(titulo, descricao, cor, fields=None):
+    """Logs para o sistema de reservas funcionários"""
+    canal = bot.get_channel(CANAL_RESERVAS_FUNC_LOGS_ID)
     if canal:
         embed = discord.Embed(title=titulo, description=descricao, color=cor, timestamp=datetime.now())
         if fields:
@@ -1279,7 +1302,7 @@ class BotaoCriarCanalView(View):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:200]}", ephemeral=True)
 
-# ========= SISTEMA DE RESERVAS (com VIP Fac) =========
+# ========= SISTEMA DE RESERVAS (CLIENTES) =========
 class ReservaView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1373,7 +1396,6 @@ class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens e VIP"):
                 "membros": float(self.membros.value.replace(",", ".")),
                 "vip_fac": float(self.vip_fac.value.replace(",", "."))
             }
-            # Não exigimos que a soma seja 100% porque o VIP pode ser adicionado
             dados["pedidos"]["config"]["porcentagens"] = pcts
             dados["pedidos"]["config"]["ultima_edicao"] = {"por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             salvar_dados()
@@ -1393,6 +1415,120 @@ class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens e VIP"):
                 ]
             )
             await log_admin_embed("⚙️ PORCENTAGENS EDITADAS", f"Novas porcentagens: Cliente {pcts['cliente']}%, Máquina {pcts['maquina']}%, Facção {pcts['fac']}%, Membros {pcts['membros']}%, VIP Fac {pcts['vip_fac']}%", 0x2c2f33)
+        except ValueError:
+            await interaction.response.send_message("Valores inválidos. Use números.", ephemeral=True)
+
+# ========= SISTEMA DE RESERVAS FUNCIONÁRIOS (DUPLICADO E MODIFICADO) =========
+class ReservaFuncView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    @discord.ui.button(label="💸 Nova reserva (Func)", style=discord.ButtonStyle.success, emoji="💸")
+    async def nova_reserva_func(self, interaction: discord.Interaction, button: Button):
+        if not pode_registrar_acao(interaction.user):
+            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem criar reservas de funcionários.", ephemeral=True)
+            return
+        await interaction.response.send_modal(NovaReservaFuncModal())
+    @discord.ui.button(label="⚙️ Editar Porcentagens (Func)", style=discord.ButtonStyle.primary, emoji="⚙️")
+    async def editar_porcentagens_func(self, interaction: discord.Interaction, button: Button):
+        if not pode_registrar_acao(interaction.user):
+            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem editar porcentagens.", ephemeral=True)
+            return
+        await interaction.response.send_modal(EditarPorcentagensFuncModal())
+
+class NovaReservaFuncModal(Modal, title="💸 Nova Reserva (Funcionário)"):
+    funcionario = TextInput(label="Nome do Funcionário", required=True)
+    valor_total = TextInput(label="Valor Total Sujo (R$)", required=True)
+    prazo_entrega = TextInput(label="Prazo de Entrega", required=True)
+    descontado_caixa = TextInput(label="Descontado do Caixa? (Sim/Não/Pendente)", required=True)
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            valor = float(self.valor_total.value.replace(",", "."))
+        except:
+            await interaction.followup.send("Valor inválido!", ephemeral=True)
+            return
+        descontado = self.descontado_caixa.value.strip().capitalize()
+        if descontado not in ["Sim", "Não", "Pendente"]:
+            await interaction.followup.send("Descontado deve ser Sim, Não ou Pendente.", ephemeral=True)
+            return
+        pcts = dados["pedidos_funcionarios"]["config"]["porcentagens"]
+        vip = pcts.get("vip_fac", 0)
+        fac_percent = pcts["fac"] + vip
+        # SEM MEMBROS
+        func_part = valor * pcts["funcionario"] / 100
+        maquina_part = valor * pcts["maquina"] / 100
+        fac_part = valor * fac_percent / 100
+        reserva = {
+            "id": len(dados["pedidos_funcionarios"]["lista"]) + 1,
+            "funcionario": self.funcionario.value.strip(),
+            "valor_total": valor,
+            "prazo_entrega": self.prazo_entrega.value.strip(),
+            "descontado_caixa": descontado,
+            "data_criacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "criado_por": interaction.user.id,
+            "distribuicao": {"funcionario": func_part, "maquina": maquina_part, "fac": fac_part, "vip_fac": vip},
+            "pago": False
+        }
+        dados["pedidos_funcionarios"]["lista"].append(reserva)
+        salvar_dados()
+        embed = discord.Embed(title="💸 NOVA RESERVA (FUNCIONÁRIO)", color=0x2c2f33, timestamp=datetime.now())
+        embed.add_field(name="Funcionário", value=reserva["funcionario"], inline=True)
+        embed.add_field(name="Valor Total", value=f"R$ {valor:,.2f}", inline=True)
+        embed.add_field(name="Prazo", value=reserva["prazo_entrega"], inline=True)
+        embed.add_field(name="Descontado", value=descontado, inline=True)
+        distrib = f"Funcionário: R$ {func_part:,.2f} ({pcts['funcionario']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({fac_percent}% incluindo VIP {vip}%)"
+        embed.add_field(name="Distribuição", value=distrib, inline=False)
+        embed.set_footer(text=f"Reserva #{reserva['id']} - Criado por {interaction.user.name}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        await log_reserva_func_embed(
+            "💸 NOVA RESERVA (FUNCIONÁRIO)",
+            f"Reserva #{reserva['id']} criada por {interaction.user.mention}",
+            0x2c2f33,
+            fields=[
+                ("Funcionário", reserva["funcionario"], True),
+                ("Valor Total", f"R$ {valor:,.2f}", True),
+                ("Prazo", reserva["prazo_entrega"], True),
+                ("Descontado", descontado, True),
+                ("Distribuição", f"Funcionário: R$ {func_part:,.2f} ({pcts['funcionario']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({fac_percent}% incluindo VIP {vip}%)", False)
+            ]
+        )
+        await log_admin_embed("💸 NOVA RESERVA (FUNCIONÁRIO)", f"Reserva #{reserva['id']} criada por {interaction.user.mention}", 0x2c2f33)
+
+class EditarPorcentagensFuncModal(Modal, title="⚙️ Editar Porcentagens (Funcionários)"):
+    funcionario = TextInput(label="% Funcionário", default="50", required=True)
+    maquina = TextInput(label="% Máquina", default="40", required=True)
+    fac = TextInput(label="% Facção", default="5", required=True)
+    vip_fac = TextInput(label="% VIP Fac (bônus)", default="10", required=True)
+    # SEM MEMBROS
+    async def on_submit(self, interaction: discord.Interaction):
+        if not pode_registrar_acao(interaction.user):
+            await interaction.response.send_message("Sem permissão.", ephemeral=True)
+            return
+        try:
+            pcts = {
+                "funcionario": float(self.funcionario.value.replace(",", ".")),
+                "maquina": float(self.maquina.value.replace(",", ".")),
+                "fac": float(self.fac.value.replace(",", ".")),
+                "vip_fac": float(self.vip_fac.value.replace(",", "."))
+            }
+            dados["pedidos_funcionarios"]["config"]["porcentagens"] = pcts
+            dados["pedidos_funcionarios"]["config"]["ultima_edicao"] = {"por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+            salvar_dados()
+            total = pcts["funcionario"] + pcts["maquina"] + pcts["fac"] + pcts["vip_fac"]
+            await interaction.response.send_message(f"✅ Porcentagens (Funcionários) atualizadas!\nFuncionário {pcts['funcionario']}% | Máquina {pcts['maquina']}% | Facção {pcts['fac']}% | VIP Fac {pcts['vip_fac']}% (total {total}%)", ephemeral=True)
+            await log_reserva_func_embed(
+                "⚙️ PORCENTAGENS EDITADAS (FUNCIONÁRIOS)",
+                f"Porcentagens editadas por {interaction.user.mention}",
+                0x2c2f33,
+                fields=[
+                    ("Funcionário", f"{pcts['funcionario']}%", True),
+                    ("Máquina", f"{pcts['maquina']}%", True),
+                    ("Facção", f"{pcts['fac']}%", True),
+                    ("VIP Fac", f"{pcts['vip_fac']}%", True),
+                    ("Total", f"{total}%", True)
+                ]
+            )
+            await log_admin_embed("⚙️ PORCENTAGENS EDITADAS (FUNCIONÁRIOS)", f"Novas porcentagens: Funcionário {pcts['funcionario']}%, Máquina {pcts['maquina']}%, Facção {pcts['fac']}%, VIP Fac {pcts['vip_fac']}%", 0x2c2f33)
         except ValueError:
             await interaction.response.send_message("Valores inválidos. Use números.", ephemeral=True)
 
@@ -1476,7 +1612,7 @@ async def on_ready():
             view.add_item(button)
             await canal_set.send(embed=embed_set, view=view)
 
-        # Painel de Reservas (antigo Pedidos)
+        # Painel de Reservas (Clientes)
         categoria_reservas = guild.get_channel(CATEGORIA_PEDIDOS_ID)
         if categoria_reservas:
             canal_reservas = discord.utils.get(categoria_reservas.channels, name="reservas")
@@ -1491,6 +1627,19 @@ async def on_ready():
                 color=0x2c2f33
             )
             await canal_reservas.send(embed=embed_reservas, view=ReservaView())
+
+        # Painel de Reservas Funcionários (DUPLICADO)
+        canal_reservas_func = guild.get_channel(CANAL_RESERVAS_FUNC_PAINEL_ID)
+        if canal_reservas_func:
+            async for msg in canal_reservas_func.history(limit=5):
+                if msg.author == bot.user:
+                    await msg.delete()
+            embed_reservas_func = discord.Embed(
+                title="💸 SISTEMA DE RESERVAS (FUNCIONÁRIOS)",
+                description="Gerencie reserva de funcionários.\n\n**Botões:**\n💸 Nova reserva (Func)\n⚙️ Editar Porcentagens (Func) – sem % Membros",
+                color=0x2c2f33
+            )
+            await canal_reservas_func.send(embed=embed_reservas_func, view=ReservaFuncView())
 
         # Painel de Lives
         canal_lives = guild.get_channel(CANAL_LIVES_PAINEL_ID)
@@ -1517,7 +1666,7 @@ async def on_ready():
 
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Reservas, Lives, Compra/Venda.", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Reservas (Clientes e Funcionários), Lives, Compra/Venda.", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

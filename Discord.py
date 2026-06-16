@@ -919,7 +919,7 @@ class CompraVendaView(View):
     async def compra(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(CompraModal())
 
-# ========= RESTAURAÇÃO DE CANAIS DE FARM (CORRIGIDA) =========
+# ========= RESTAURAÇÃO DE CANAIS DE FARM =========
 async def restaurar_canais_farms():
     for user_id_str, canal_id in dados["canais"].items():
         canal = bot.get_channel(canal_id)
@@ -934,7 +934,7 @@ async def restaurar_canais_farms():
                     view = FarmChannelView(member.id, member.display_name, canal.id)
                     embed = discord.Embed(
                         title="📦 SEU CANAL PRIVADO",
-                        description=f"Bem-vindo(a) {member.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Farm Produtos\n💰 Registrar Dinheiro Sujo (Admin)\n✏️ Editar Registro\n📋 Meus Registros\n📊 Fechar Caixa\n🔄 Reset Semanal\n🗑️ Fechar Canal",
+                        description=f"Bem-vindo(a) {member.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Farm Produtos\n💰 Registrar Dinheiro Sujo (Admin)\n✏️ Editar Registro\n📋 Meus Registros\n📊 Fechar Caixa\n🔄 Reset Semanal",
                         color=0x2c2f33
                     )
                     await canal.send(embed=embed, view=view)
@@ -1120,7 +1120,7 @@ class SelecionarMembroView(View):
         await atualizar_ranking()
         self.stop()
 
-# ========= VIEW DO CANAL PRIVADO (COM TODOS OS BOTÕES, PERMISSÕES NOS CALLBACKS) =========
+# ========= VIEW DO CANAL PRIVADO (SEM BOTÃO "FECHAR CANAL") =========
 class FarmChannelView(View):
     def __init__(self, user_id, user_name, canal_id):
         super().__init__(timeout=None)
@@ -1130,7 +1130,6 @@ class FarmChannelView(View):
         self._add_buttons()
 
     def _add_buttons(self):
-        # Todos os botões são adicionados, mas apenas admins podem usá-los
         farm_btn = Button(label="Farm Produtos", style=discord.ButtonStyle.secondary, emoji="📦", row=0, custom_id="farm_produtos")
         farm_btn.callback = self.farm_produtos_callback
         self.add_item(farm_btn)
@@ -1155,9 +1154,7 @@ class FarmChannelView(View):
         reset_btn.callback = self.reset_semanal_callback
         self.add_item(reset_btn)
 
-        fechar_canal_btn = Button(label="Fechar Canal", style=discord.ButtonStyle.danger, emoji="🗑️", row=2, custom_id="fechar_canal")
-        fechar_canal_btn.callback = self.fechar_canal_callback
-        self.add_item(fechar_canal_btn)
+        # Botão "Fechar Canal" removido
 
     async def farm_produtos_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id and not is_admin(interaction.user):
@@ -1234,13 +1231,6 @@ class FarmChannelView(View):
         confirm_view = ConfirmResetSemanalView(self.user_id, self.user_name, interaction.channel)
         await interaction.response.send_message("⚠️ **Tem certeza que deseja resetar a semana?** Isso apagará todos os registros de farm, pagamentos e dinheiro sujo deste usuário.", view=confirm_view, ephemeral=True)
 
-    async def fechar_canal_callback(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas administradores.", ephemeral=True)
-            return
-        confirm_view = ConfirmarFechamentoView(self.user_id, interaction.channel)
-        await interaction.response.send_message("⚠️ **Tem certeza que deseja fechar este canal?**", view=confirm_view, ephemeral=True)
-
 class ConfirmResetSemanalView(View):
     def __init__(self, user_id, user_name, canal):
         super().__init__(timeout=60)
@@ -1267,27 +1257,6 @@ class ConfirmResetSemanalView(View):
     @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary, emoji="❌")
     async def cancel(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message("Reset cancelado.", ephemeral=True)
-
-class ConfirmarFechamentoView(View):
-    def __init__(self, user_id, canal):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.canal = canal
-    @discord.ui.button(label="Sim, fechar canal", style=discord.ButtonStyle.danger, emoji="✅")
-    async def confirmar(self, interaction: discord.Interaction, button: Button):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Sem permissão.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        if str(self.user_id) in dados["canais"]:
-            del dados["canais"][str(self.user_id)]
-            salvar_dados()
-        await self.canal.delete()
-        await interaction.followup.send("Canal fechado!", ephemeral=True)
-        await log_admin_embed("🗑️ CANAL FECHADO", f"Canal de {interaction.user.mention} foi fechado por {interaction.user.mention}", 0x4f545c)
-    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.secondary, emoji="❌")
-    async def cancelar(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message("Cancelado!", ephemeral=True)
 
 # ========= BOTÃO CRIAR CANAL =========
 class BotaoCriarCanalView(View):
@@ -1338,7 +1307,7 @@ class BotaoCriarCanalView(View):
             view = FarmChannelView(interaction.user.id, interaction.user.name, canal.id)
             embed = discord.Embed(
                 title="📦 SEU CANAL PRIVADO",
-                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Farm Produtos\n💰 Registrar Dinheiro Sujo (Admin)\n✏️ Editar Registro\n📋 Meus Registros\n📊 Fechar Caixa\n🔄 Reset Semanal\n🗑️ Fechar Canal",
+                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Farm Produtos\n💰 Registrar Dinheiro Sujo (Admin)\n✏️ Editar Registro\n📋 Meus Registros\n📊 Fechar Caixa\n🔄 Reset Semanal",
                 color=0x2c2f33
             )
             await canal.send(embed=embed, view=view)

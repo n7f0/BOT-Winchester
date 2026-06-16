@@ -864,7 +864,8 @@ class VendaModal(Modal, title="💸 Venda de Munição"):
         try:
             msg = await bot.wait_for('message', timeout=60.0, check=check)
             imagem_url = msg.attachments[0].url
-            await msg.delete()
+            # A mensagem com a print NÃO é mais apagada para que a imagem fique visível no canal.
+            # await msg.delete()  # removido
         except asyncio.TimeoutError:
             await interaction.followup.send("Tempo esgotado!", ephemeral=True)
             return
@@ -899,7 +900,7 @@ class CompraModal(Modal, title="🛒 Compra de Produto"):
         try:
             msg = await bot.wait_for('message', timeout=60.0, check=check)
             imagem_url = msg.attachments[0].url
-            await msg.delete()
+            # await msg.delete()  # removido
         except asyncio.TimeoutError:
             await interaction.followup.send("Tempo esgotado!", ephemeral=True)
             return
@@ -977,7 +978,7 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
         try:
             msg_print = await bot.wait_for('message', timeout=60.0, check=check_print)
             imagem_url = msg_print.attachments[0].url
-            await msg_print.delete()
+            # await msg_print.delete()  # removido
         except asyncio.TimeoutError:
             await self.canal.send("⏰ Tempo esgotado! Registro cancelado.", delete_after=10)
             return
@@ -1058,7 +1059,7 @@ class DinheiroSujoAdminModal(Modal, title="💰 Registrar Dinheiro Sujo (Admin)"
         try:
             msg = await bot.wait_for('message', timeout=60.0, check=check)
             imagem_url = msg.attachments[0].url
-            await msg.delete()
+            # await msg.delete()  # removido
         except asyncio.TimeoutError:
             await interaction.followup.send("Tempo esgotado!", ephemeral=True)
             return

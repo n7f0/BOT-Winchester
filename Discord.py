@@ -260,7 +260,7 @@ def pode_aprovar_set(member):
 def pode_remover_membro(member):
     return tem_cargo(member, CARGO_REMOVER_MEMBRO_IDS)
 
-# ========= RANKING (baseado em total de itens / 20) =========
+# ========= RANKING =========
 async def atualizar_ranking():
     canal = bot.get_channel(CHAT_RANK_ID)
     if not canal:
@@ -895,7 +895,7 @@ class AddStreamerByLinkModal(Modal, title="Adicionar Streamer"):
         except:
             pass
 
-# ========= SISTEMA DE COMPRA E VENDA (SEM PRINT) =========
+# ========= SISTEMA DE COMPRA E VENDA =========
 class VendaModal(Modal, title="💸 Venda"):
     item = TextInput(label="Item", placeholder="Ex: Munição, Arma, Medicamento", required=True)
     quantidade = TextInput(label="Quantidade", placeholder="Ex: 1000", required=True)
@@ -1053,7 +1053,7 @@ async def restaurar_canais_farms():
                     )
                     await canal.send(embed=embed, view=view)
 
-# ========= MODAL DE FARM PRODUTOS (5 PRODUTOS) - PRINT OBRIGATÓRIO =========
+# ========= MODAL DE FARM PRODUTOS COM PRINT OBRIGATÓRIO E EXIBIÇÃO NO CHAT =========
 class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
     relogio = TextInput(label="RELÓGIO DE LUXO - Quantidade", placeholder="Ex: 5", required=False)
     obra = TextInput(label="OBRA DE ARTE - Quantidade", placeholder="Ex: 2", required=False)
@@ -1092,7 +1092,7 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
         try:
             msg_print = await bot.wait_for('message', timeout=60.0, check=check_print)
             imagem_url = msg_print.attachments[0].url
-            # Apagar a mensagem do print para manter o canal limpo (opcional)
+            # Opcional: deletar a mensagem do print para manter o canal limpo
             await msg_print.delete()
         except asyncio.TimeoutError:
             await interaction.followup.send("⏰ Tempo esgotado! Registro cancelado.", ephemeral=True)
@@ -1342,7 +1342,6 @@ class PainelControleView(View):
         )
         await interaction.followup.send(embed=embed, view=PainelControleView(), ephemeral=True)
 
-# ========= MODAL PARA REGISTRAR ENTREGA (ACEITA QUALQUER NOME) =========
 class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
     membro = TextInput(label="Nome do recebedor (vulgo ou ID)", placeholder="Digite o nome, vulgo ou ID", required=True)
     valor = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
@@ -2035,7 +2034,7 @@ async def on_ready():
 
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm (com print obrigatório), Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

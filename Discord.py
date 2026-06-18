@@ -199,11 +199,8 @@ async def log_farm(embed: discord.Embed):
     if canal:
         try:
             await canal.send(embed=embed)
-            print(f"[LOG FARM] Embed enviada para {LOG_FARM_ID}")
         except Exception as e:
             print(f"[LOG FARM] Erro ao enviar embed: {e}")
-    else:
-        print(f"[LOG FARM] Canal {LOG_FARM_ID} não encontrado!")
 
 async def limpar_logs_usuario(user_id, user_name):
     if str(user_id) in dados["usuarios_banidos"]:
@@ -275,7 +272,7 @@ def pode_aprovar_set(member):
 def pode_remover_membro(member):
     return tem_cargo(member, CARGO_REMOVER_MEMBRO_IDS)
 
-# ========= RANKING =========
+# ========= RANKING (bebida NÃO conta) =========
 async def atualizar_ranking():
     canal = bot.get_channel(CHAT_RANK_ID)
     if not canal:
@@ -285,6 +282,9 @@ async def atualizar_ranking():
             await msg.delete()
 
     ranking = []
+    # Produtos que contam para o ranking (excluindo BEBIDA IMPORTADA)
+    PRODUTOS_CONTAM = ["RELÓGIO DE LUXO", "OBRA DE ARTE", "AÇÕES DE EMPRESA", "CARTEIRA NFT"]
+
     for uid, data in dados["usuarios"].items():
         if "removido_em" in data:
             continue
@@ -292,7 +292,10 @@ async def atualizar_ranking():
         total_itens = 0
         for farm in farms:
             for produto in farm.get("produtos", []):
-                total_itens += produto.get("quantidade", 0)
+                nome = produto.get("produto", "")
+                if nome in PRODUTOS_CONTAM:
+                    total_itens += produto.get("quantidade", 0)
+        # Cada 20 itens = 1 rota
         rotas = total_itens // 20
         if rotas > 0:
             nome_registro = data.get("registro_nome")
@@ -310,14 +313,15 @@ async def atualizar_ranking():
             ranking.append({
                 "usuario": nome_exibicao,
                 "usuario_id": uid,
-                "rotas": rotas
+                "rotas": rotas,
+                "total_itens": total_itens
             })
 
     ranking_ordenado = sorted(ranking, key=lambda x: x["rotas"], reverse=True)[:10]
 
     embed = discord.Embed(
         title="🏆 RANKING DE ROTAS (20 ITENS = 1 ROTA)",
-        description=f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        description=f"*Bebida importada não é considerada.*\nAtualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
         color=0x2c2f33
     )
 
@@ -325,7 +329,8 @@ async def atualizar_ranking():
         emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}°"
         valor = (
             f"**{emoji} {item['usuario']}**\n"
-            f"Rotas: {item['rotas']}"
+            f"Rotas: {item['rotas']}\n"
+            f"Itens contados: {item['total_itens']}"
         )
         embed.add_field(name=f"Posição #{i}", value=valor, inline=False)
 
@@ -1110,7 +1115,6 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             msg_print = await bot.wait_for('message', timeout=60.0, check=check_print)
             imagem_url = msg_print.attachments[0].url
             # NÃO DELETA A MENSAGEM COM A PRINT - permanece no chat privado
-            # await msg_print.delete()  # <-- REMOVIDO
         except asyncio.TimeoutError:
             await interaction.followup.send("⏰ Tempo esgotado! Registro cancelado.", ephemeral=True)
             return
@@ -1138,7 +1142,7 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             embed.add_field(name="📅 Data da edição", value=datetime.now().strftime("%d/%m/%Y às %H:%M"), inline=False)
             embed.set_image(url=imagem_url)
             await self.canal.send(embed=embed)
-            await log_farm(embed)  # Envia para o canal de logs de farm
+            await log_farm(embed)
             await log_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: <@{self.user_id}>\nSlot: {self.slot_num}\nProdutos: {desc}", 0x99aab5, thumbnail=interaction.user.display_avatar.url)
             await log_admin_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {self.slot_num}", 0x99aab5)
             await interaction.followup.send("Farm editada com sucesso!", ephemeral=True)
@@ -1161,7 +1165,7 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             embed.set_image(url=imagem_url)
             embed.set_footer(text=f"Farm ID: {registro['farm_id']}")
             await self.canal.send(embed=embed)
-            await log_farm(embed)  # Envia para o canal de logs de farm
+            await log_farm(embed)
             await log_embed("📦 FARM PRODUTOS REGISTRADA", f"Usuário: <@{self.user_id}>\nSlot: {self.slot_num}\nProdutos: {desc}", 0x2c2f33, thumbnail=interaction.user.display_avatar.url)
             await log_admin_embed("📦 NOVA FARM PRODUTOS", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {self.slot_num}", 0x2c2f33)
             await interaction.followup.send("Farm registrada com sucesso!", ephemeral=True)

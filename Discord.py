@@ -274,11 +274,7 @@ async def atualizar_ranking():
         if "removido_em" in data:
             continue
         farms = data.get("farms", [])
-        total_itens = 0
-        for farm in farms:
-            for produto in farm.get("produtos", []):
-                total_itens += produto.get("quantidade", 0)
-        rotas = total_itens // 20
+        rotas = len(farms)  # cada farm = 1 rota
         if rotas > 0:
             try:
                 if uid.startswith("vulgo_"):
@@ -291,14 +287,13 @@ async def atualizar_ranking():
             ranking.append({
                 "usuario": nome,
                 "usuario_id": uid,
-                "rotas": rotas,
-                "total_itens": total_itens
+                "rotas": rotas
             })
 
     ranking_ordenado = sorted(ranking, key=lambda x: x["rotas"], reverse=True)[:10]
 
     embed = discord.Embed(
-        title="🏆 RANKING DE ROTAS (ITENS / 20)",
+        title="🏆 RANKING DE ROTAS (FARMS REGISTRADAS)",
         description=f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
         color=0x2c2f33
     )
@@ -307,8 +302,7 @@ async def atualizar_ranking():
         emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}°"
         valor = (
             f"**{emoji} {item['usuario']}**\n"
-            f"Rotas: {item['rotas']}\n"
-            f"Total de itens: {item['total_itens']}"
+            f"Rotas: {item['rotas']}"
         )
         embed.add_field(name=f"Posição #{i}", value=valor, inline=False)
 
@@ -1092,8 +1086,7 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
         try:
             msg_print = await bot.wait_for('message', timeout=60.0, check=check_print)
             imagem_url = msg_print.attachments[0].url
-            # Opcional: deletar a mensagem do print para manter o canal limpo
-            await msg_print.delete()
+            # NÃO DELETAR a mensagem com a print – o usuário pediu para manter.
         except asyncio.TimeoutError:
             await interaction.followup.send("⏰ Tempo esgotado! Registro cancelado.", ephemeral=True)
             return

@@ -193,11 +193,18 @@ async def log_entrega_dinheiro_sujo(entregador: discord.Member, recebedor, valor
         embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/196/196566.png")
         await canal.send(embed=embed)
 
+# Função específica para logs de farm - envia a embed com a imagem
 async def log_farm(embed: discord.Embed):
-    """Envia a embed do farm para o canal de logs de farm"""
+    """Envia a embed do farm para o canal de logs de farm (com a imagem)"""
     canal = bot.get_channel(LOG_FARM_ID)
     if canal:
-        await canal.send(embed=embed)
+        try:
+            await canal.send(embed=embed)
+            print(f"[LOG FARM] Embed enviada para {LOG_FARM_ID}")
+        except Exception as e:
+            print(f"[LOG FARM] Erro ao enviar embed: {e}")
+    else:
+        print(f"[LOG FARM] Canal {LOG_FARM_ID} não encontrado!")
 
 async def limpar_logs_usuario(user_id, user_name):
     if str(user_id) in dados["usuarios_banidos"]:

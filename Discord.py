@@ -52,7 +52,7 @@ CANAL_PAINEL_BAUS_ID = 1516947055698772039
 LOG_ENTREGAS_DINHEIRO_SUJO_ID = 1516949594712440852
 PAINEL_CONTROLE_DINHEIRO_SUJO_ID = 1516949565708959835
 
-# NOVO CANAL DE LOGS PARA FARMS (PRINTS)
+# CANAL DE LOGS PARA FARMS (PRINTS)
 LOG_FARM_ID = 1517267814854168817
 
 CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
@@ -193,7 +193,6 @@ async def log_entrega_dinheiro_sujo(entregador: discord.Member, recebedor, valor
         embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/196/196566.png")
         await canal.send(embed=embed)
 
-# Função específica para logs de farm - envia a embed com a imagem
 async def log_farm(embed: discord.Embed):
     """Envia a embed do farm para o canal de logs de farm (com a imagem)"""
     canal = bot.get_channel(LOG_FARM_ID)
@@ -1071,7 +1070,7 @@ async def restaurar_canais_farms():
                     )
                     await canal.send(embed=embed, view=view)
 
-# ========= MODAL DE FARM PRODUTOS =========
+# ========= MODAL DE FARM PRODUTOS (PRINT NÃO É DELETADA) =========
 class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
     relogio = TextInput(label="RELÓGIO DE LUXO - Quantidade", placeholder="Ex: 5", required=False)
     obra = TextInput(label="OBRA DE ARTE - Quantidade", placeholder="Ex: 2", required=False)
@@ -1103,14 +1102,15 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             await interaction.followup.send("Nenhum produto válido!", ephemeral=True)
             return
 
-        # Solicitar print obrigatório
+        # Solicitar print obrigatório - a mensagem com a imagem NÃO será deletada
         await interaction.followup.send("📸 **Envie a print da farm** (imagem) neste canal. Você tem 60 segundos.", ephemeral=True)
         def check_print(m):
             return m.author == interaction.user and m.channel == self.canal and m.attachments
         try:
             msg_print = await bot.wait_for('message', timeout=60.0, check=check_print)
             imagem_url = msg_print.attachments[0].url
-            await msg_print.delete()
+            # NÃO DELETA A MENSAGEM COM A PRINT - permanece no chat privado
+            # await msg_print.delete()  # <-- REMOVIDO
         except asyncio.TimeoutError:
             await interaction.followup.send("⏰ Tempo esgotado! Registro cancelado.", ephemeral=True)
             return
@@ -2053,7 +2053,7 @@ async def on_ready():
 
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm (logs com print), Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm (print permanece no chat), Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

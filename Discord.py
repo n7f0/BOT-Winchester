@@ -8,6 +8,7 @@ import os
 import sys
 import re
 import aiohttp
+import hashlib
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
@@ -174,13 +175,23 @@ async def log_bau(tipo, canal_id, dados_log):
             embed.add_field(name=chave, value=valor, inline=False)
         await canal.send(embed=embed)
 
-# NOVA FUNÇÃO: log específico para entregas de dinheiro sujo
-async def log_entrega_dinheiro_sujo(entregador: discord.Member, recebedor: discord.Member, valor: float, data: str, observacao: str = ""):
+# Função de log adaptada para aceitar recebedor como Member ou string (vulgo)
+async def log_entrega_dinheiro_sujo(entregador: discord.Member, recebedor, valor: float, data: str, observacao: str = ""):
+    """
+    recebedor pode ser discord.Member ou string (nome/vulgo)
+    """
     canal = bot.get_channel(LOG_ENTREGAS_DINHEIRO_SUJO_ID)
     if canal:
+        if isinstance(recebedor, discord.Member):
+            recebedor_mention = recebedor.mention
+            recebedor_nome = recebedor.name
+        else:
+            recebedor_mention = recebedor  # string
+            recebedor_nome = recebedor
+
         embed = discord.Embed(
             title="💰 ENTREGA DE DINHEIRO SUJO",
-            description=f"**Entregador:** {entregador.mention}\n**Recebedor:** {recebedor.mention}\n**Valor:** R$ {valor:,.2f}\n**Data:** {data}\n**Observação:** {observacao or 'Nenhuma'}",
+            description=f"**Entregador:** {entregador.mention}\n**Recebedor:** {recebedor_mention}\n**Valor:** R$ {valor:,.2f}\n**Data:** {data}\n**Observação:** {observacao or 'Nenhuma'}",
             color=0x4f545c,
             timestamp=datetime.now()
         )
@@ -275,13 +286,17 @@ async def atualizar_ranking():
         for farm in farms:
             for produto in farm.get("produtos", []):
                 total_itens += produto.get("quantidade", 0)
-        rotas = total_itens // 20  # cada 20 itens = 1 rota
+        rotas = total_itens // 20
         if rotas > 0:
             try:
-                user = await bot.fetch_user(int(uid))
-                nome = user.name
+                # Se for um vulgo, uid começa com "vulgo_"
+                if uid.startswith("vulgo_"):
+                    nome = data.get("nome", uid.replace("vulgo_", ""))
+                else:
+                    user = await bot.fetch_user(int(uid))
+                    nome = user.name
             except:
-                nome = "Usuário desconhecido"
+                nome = data.get("nome", "Usuário desconhecido")
             ranking.append({
                 "usuario": nome,
                 "usuario_id": uid,
@@ -911,7 +926,6 @@ class VendaModal(Modal, title="💸 Venda"):
             return
         comprador = self.comprador.value.strip()
         responsavel_nome = self.responsavel.value.strip()
-        # Sem print - registro direto
         dados_log = {"Tipo": "VENDA", "Item": item, "Quantidade": f"{qtd:,} unidades", "Valor Total": f"R$ {valor:,.2f}", "Comprador": comprador, "Responsável": responsavel_nome, "Registrado por": interaction.user.mention}
         await log_compra_venda("venda", dados_log)
         dados["compras_vendas"].append({"tipo": "venda", "item": item, "quantidade": qtd, "valor_total": valor, "comprador": comprador, "responsavel": responsavel_nome, "registrado_por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "print_url": None})
@@ -937,14 +951,13 @@ class CompraModal(Modal, title="🛒 Compra de Produto"):
         except:
             await interaction.followup.send("Quantidade ou valor inválidos!", ephemeral=True)
             return
-        # Sem print - registro direto
         await log_compra_venda("compra", {"Tipo": "COMPRA", "Quantidade": f"{qtd:,}", "Produto": self.produto.value, "Valor Total": f"R$ {valor:,.2f}", "Facção Vendedora": self.faccao_vendedora.value, "Responsável": self.responsavel.value, "Registrado por": interaction.user.mention})
         dados["compras_vendas"].append({"tipo": "compra", "quantidade": qtd, "produto": self.produto.value, "valor_total": valor, "faccao_vendedora": self.faccao_vendedora.value, "responsavel": self.responsavel.value, "registrado_por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "print_url": None})
         salvar_dados()
         await interaction.followup.send("✅ Compra registrada!", ephemeral=True)
         await log_admin_embed("🛒 COMPRA REGISTRADA", f"Usuário: {interaction.user.mention}\nProduto: {qtd} x {self.produto.value}\nValor: R$ {valor:,.2f}\nFacção: {self.faccao_vendedora.value}", 0x2c2f33)
 
-# ========= PAINEL DE COMPRA E VENDA (SEM BAÚS) =========
+# ========= PAINEL DE COMPRA E VENDA =========
 class CompraVendaView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -962,7 +975,7 @@ class CompraVendaView(View):
             return
         await interaction.response.send_modal(CompraModal())
 
-# ========= BAÚS (PAINEL SEPARADO, SEM PRINT, CLEAN) =========
+# ========= BAÚS =========
 class BauModal(Modal, title="📦 Baú - Registrar Item"):
     produto = TextInput(label="Produto", placeholder="Ex: Arma, Munição, Medicamento", required=True)
     quantidade = TextInput(label="Quantidade", placeholder="Ex: 50", required=True)
@@ -993,7 +1006,6 @@ class BauModal(Modal, title="📦 Baú - Registrar Item"):
             valor_str = "Não informado"
         obs = self.observacao.value.strip() or "Sem observação"
 
-        # Sem print - registro direto
         dados_log = {
             "Tipo": self.tipo_bau,
             "Produto": produto,
@@ -1083,7 +1095,6 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             await interaction.followup.send("Nenhum produto válido!", ephemeral=True)
             return
 
-        # Sem print - registro direto
         if str(self.user_id) not in dados["usuarios"]:
             dados["usuarios"][str(self.user_id)] = {"farms": [], "pagamentos": [], "nome": self.user_name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
 
@@ -1180,7 +1191,6 @@ class SelecionarMembroView(View):
             await interaction.response.send_message("Membro não encontrado.", ephemeral=True)
             return
 
-        # Atualizar dados do usuário alvo
         if str(self.target_user_id) not in dados["usuarios"]:
             dados["usuarios"][str(self.target_user_id)] = {"farms": [], "pagamentos": [], "nome": self.target_user_name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
         if "transacoes_dinheiro_sujo" not in dados["usuarios"][str(self.target_user_id)]:
@@ -1199,7 +1209,6 @@ class SelecionarMembroView(View):
         dados["usuarios"][str(self.target_user_id)]["dinheiro_sujo"] = sum(t["valor"] for t in dados["usuarios"][str(self.target_user_id)]["transacoes_dinheiro_sujo"])
         salvar_dados()
 
-        # Log no canal privado do usuário
         embed_priv = discord.Embed(
             title="💰 DINHEIRO SUJO REGISTRADO",
             description=f"**Usuário:** <@{self.target_user_id}>\n**Valor:** R$ {self.valor:,.2f}\n**Membro que recebeu:** {membro_obj.mention}\n**Registrado por:** {interaction.user.mention}\n**Observação:** {self.observacao or 'Nenhuma'}",
@@ -1209,7 +1218,6 @@ class SelecionarMembroView(View):
         embed_priv.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/196/196566.png")
         await self.canal.send(embed=embed_priv)
 
-        # Log específico no canal de entregas
         await log_entrega_dinheiro_sujo(
             entregador=interaction.user,
             recebedor=membro_obj,
@@ -1218,7 +1226,6 @@ class SelecionarMembroView(View):
             observacao=self.observacao
         )
 
-        # Logs administrativos gerais
         await log_embed(
             "💰 DINHEIRO SUJO REGISTRADO",
             f"Usuário: <@{self.target_user_id}>\nValor: R$ {self.valor:,.2f}\nMembro que recebeu: {membro_obj.mention}",
@@ -1235,7 +1242,7 @@ class SelecionarMembroView(View):
         await atualizar_ranking()
         self.stop()
 
-# ========= PAINEL DE CONTROLE DE ENTREGAS (COM BUSCA POR NOME/ID) =========
+# ========= PAINEL DE CONTROLE DE ENTREGAS =========
 class PainelControleView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1247,8 +1254,12 @@ class PainelControleView(View):
             for t in data.get("transacoes_dinheiro_sujo", []):
                 recebedor_nome = t.get("membro_nome", "Desconhecido")
                 try:
-                    entregador = await bot.fetch_user(t.get("registrado_por", 0))
-                    entregador_nome = entregador.name if entregador else "Desconhecido"
+                    # Se for vulgo, o ID pode não ser numérico
+                    if uid.startswith("vulgo_"):
+                        entregador_nome = t.get("registrado_por_nome", "Desconhecido")
+                    else:
+                        entregador = await bot.fetch_user(t.get("registrado_por", 0))
+                        entregador_nome = entregador.name if entregador else "Desconhecido"
                 except:
                     entregador_nome = "Desconhecido"
                 todas.append({
@@ -1317,18 +1328,18 @@ class PainelControleView(View):
         await interaction.response.defer()
         embed = discord.Embed(
             title="💰 PAINEL DE CONTROLE - ENTREGAS DE DINHEIRO SUJO",
-            description="Aqui você pode acompanhar todas as entregas registradas.\n\n"
+            description="Acompanhe todas as entregas registradas.\n\n"
                         "📋 **Últimas Entregas** – mostra as 10 mais recentes.\n"
                         "📊 **Estatísticas** – resumo geral.\n"
-                        "💰 **Registrar Entrega** – registre uma entrega para qualquer membro.\n"
+                        "💰 **Registrar Entrega** – registre uma entrega para qualquer membro (por nome/ID/vulgo).\n"
                         "🔄 **Atualizar** – recarrega este painel.",
             color=0x2c2f33
         )
         await interaction.followup.send(embed=embed, view=PainelControleView(), ephemeral=True)
 
-# ========= MODAL PARA REGISTRAR ENTREGA (ACEITA NOME OU ID) =========
+# ========= MODAL PARA REGISTRAR ENTREGA (ACEITA QUALQUER NOME) =========
 class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
-    membro = TextInput(label="Nome ou ID do membro", placeholder="Digite o nome ou ID do usuário", required=True)
+    membro = TextInput(label="Nome do recebedor (vulgo ou ID)", placeholder="Digite o nome, vulgo ou ID", required=True)
     valor = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
     observacao = TextInput(label="Observação (opcional)", placeholder="Detalhes sobre a entrega", required=False)
 
@@ -1345,64 +1356,111 @@ class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
         observacao = self.observacao.value.strip() or ""
         membro_input = self.membro.value.strip()
 
-        # Tentar buscar por ID primeiro
+        # Tentar buscar por ID ou nome (como antes)
         membro = None
         if membro_input.isdigit():
             membro = interaction.guild.get_member(int(membro_input))
         if not membro:
-            # Buscar por nome (case-insensitive, partial)
             membro = discord.utils.get(interaction.guild.members, name=membro_input)
-            if not membro:
-                # Tentar por display_name
-                membro = discord.utils.get(interaction.guild.members, display_name=membro_input)
         if not membro:
-            await interaction.followup.send("Membro não encontrado! Verifique o nome ou ID.", ephemeral=True)
-            return
+            membro = discord.utils.get(interaction.guild.members, display_name=membro_input)
 
-        target_id = membro.id
+        if membro:
+            # Encontrou um membro real - usar ID
+            target_id = membro.id
+            nome_recebedor = membro.name
+            recebedor_obj = membro
+        else:
+            # Não encontrou: tratar como vulgo
+            # Gerar um ID fictício baseado no nome (hash)
+            nome_recebedor = membro_input
+            hash_id = hashlib.md5(nome_recebedor.encode()).hexdigest()[:12]
+            target_id = f"vulgo_{hash_id}"
+            recebedor_obj = None  # não é um Member
 
-        # Registrar a entrega
-        if str(target_id) not in dados["usuarios"]:
-            dados["usuarios"][str(target_id)] = {"farms": [], "pagamentos": [], "nome": membro.name, "dinheiro_sujo": 0, "transacoes_dinheiro_sujo": []}
-        if "transacoes_dinheiro_sujo" not in dados["usuarios"][str(target_id)]:
-            dados["usuarios"][str(target_id)]["transacoes_dinheiro_sujo"] = []
+        # Criar/atualizar entrada em dados["usuarios"]
+        if target_id not in dados["usuarios"]:
+            dados["usuarios"][target_id] = {
+                "farms": [],
+                "pagamentos": [],
+                "dinheiro_sujo": 0,
+                "transacoes_dinheiro_sujo": [],
+                "nome": nome_recebedor,
+                "vulgo": True if not membro else False
+            }
+        elif not membro and "vulgo" not in dados["usuarios"][target_id]:
+            # Se já existe e não é vulgo, manter o nome original? Vamos preservar.
+            pass
 
+        # Garantir que a lista de transações existe
+        if "transacoes_dinheiro_sujo" not in dados["usuarios"][target_id]:
+            dados["usuarios"][target_id]["transacoes_dinheiro_sujo"] = []
+
+        # Registrar transação
         transacao = {
             "valor": valor,
             "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "print_url": None,
             "registrado_por": interaction.user.id,
             "membro_recebedor": target_id,
-            "membro_nome": membro.name,
+            "membro_nome": nome_recebedor,
             "observacao": observacao
         }
-        dados["usuarios"][str(target_id)]["transacoes_dinheiro_sujo"].append(transacao)
-        dados["usuarios"][str(target_id)]["dinheiro_sujo"] = sum(t["valor"] for t in dados["usuarios"][str(target_id)]["transacoes_dinheiro_sujo"])
+        # Se for vulgo, armazenamos o nome do entregador também para histórico
+        if not membro:
+            transacao["registrado_por_nome"] = interaction.user.name
+
+        dados["usuarios"][target_id]["transacoes_dinheiro_sujo"].append(transacao)
+        dados["usuarios"][target_id]["dinheiro_sujo"] = sum(t["valor"] for t in dados["usuarios"][target_id]["transacoes_dinheiro_sujo"])
         salvar_dados()
 
         # Logs
-        await log_entrega_dinheiro_sujo(
-            entregador=interaction.user,
-            recebedor=membro,
-            valor=valor,
-            data=datetime.now().strftime("%d/%m/%Y %H:%M"),
-            observacao=observacao
-        )
-        await log_embed(
-            "💰 DINHEIRO SUJO REGISTRADO",
-            f"Usuário: {membro.mention}\nValor: R$ {valor:,.2f}\nRegistrado por: {interaction.user.mention}",
-            0x4f545c,
-            thumbnail="https://cdn-icons-png.flaticon.com/512/196/196566.png"
-        )
-        await log_admin_embed(
-            "💰 DINHEIRO SUJO REGISTRADO (PAINEL)",
-            f"Usuário: {membro.name}\nValor: R$ {valor:,.2f}\nObservação: {observacao or 'Nenhuma'}",
-            0x4f545c
-        )
-        await interaction.followup.send(f"R$ {valor:,.2f} registrado como dinheiro sujo para {membro.mention}!", ephemeral=True)
+        if membro:
+            await log_entrega_dinheiro_sujo(
+                entregador=interaction.user,
+                recebedor=membro,
+                valor=valor,
+                data=datetime.now().strftime("%d/%m/%Y %H:%M"),
+                observacao=observacao
+            )
+            await log_embed(
+                "💰 DINHEIRO SUJO REGISTRADO",
+                f"Usuário: {membro.mention}\nValor: R$ {valor:,.2f}\nRegistrado por: {interaction.user.mention}",
+                0x4f545c,
+                thumbnail="https://cdn-icons-png.flaticon.com/512/196/196566.png"
+            )
+            await log_admin_embed(
+                "💰 DINHEIRO SUJO REGISTRADO (PAINEL)",
+                f"Usuário: {membro.name}\nValor: R$ {valor:,.2f}\nObservação: {observacao or 'Nenhuma'}",
+                0x4f545c
+            )
+            await interaction.followup.send(f"R$ {valor:,.2f} registrado como dinheiro sujo para {membro.mention}!", ephemeral=True)
+        else:
+            # Vulgo
+            # Para o log, passamos o nome como string
+            await log_entrega_dinheiro_sujo(
+                entregador=interaction.user,
+                recebedor=nome_recebedor,
+                valor=valor,
+                data=datetime.now().strftime("%d/%m/%Y %H:%M"),
+                observacao=observacao
+            )
+            await log_embed(
+                "💰 DINHEIRO SUJO REGISTRADO (VULGO)",
+                f"Recebedor: **{nome_recebedor}**\nValor: R$ {valor:,.2f}\nRegistrado por: {interaction.user.mention}",
+                0x4f545c,
+                thumbnail="https://cdn-icons-png.flaticon.com/512/196/196566.png"
+            )
+            await log_admin_embed(
+                "💰 DINHEIRO SUJO REGISTRADO (VULGO)",
+                f"Recebedor: {nome_recebedor}\nValor: R$ {valor:,.2f}\nObservação: {observacao or 'Nenhuma'}",
+                0x4f545c
+            )
+            await interaction.followup.send(f"R$ {valor:,.2f} registrado como dinheiro sujo para **{nome_recebedor}** (vulgo)!", ephemeral=True)
+
         await atualizar_ranking()
 
-# ========= VIEW DO CANAL PRIVADO (SEM FECHAR CAIXA) =========
+# ========= VIEW DO CANAL PRIVADO =========
 class FarmChannelView(View):
     def __init__(self, user_id, user_name, canal_id):
         super().__init__(timeout=None)
@@ -1606,7 +1664,7 @@ class BotaoCriarCanalView(View):
         except Exception as e:
             await interaction.followup.send(f"Erro: {str(e)[:200]}", ephemeral=True)
 
-# ========= SISTEMA DE RESERVAS (CLIENTES) =========
+# ========= RESERVAS CLIENTES =========
 class ReservaView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1722,7 +1780,7 @@ class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens e VIP"):
         except ValueError:
             await interaction.response.send_message("Valores inválidos. Use números.", ephemeral=True)
 
-# ========= SISTEMA DE RESERVAS FUNCIONÁRIOS =========
+# ========= RESERVAS FUNCIONÁRIOS =========
 class ReservaFuncView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1962,7 +2020,7 @@ async def on_ready():
             )
             await canal_compra_venda.send(embed=embed_compra_venda, view=CompraVendaView())
 
-        # Painel de Baús (SEPARADO)
+        # Painel de Baús
         canal_painel_baus = guild.get_channel(CANAL_PAINEL_BAUS_ID)
         if canal_painel_baus:
             async for msg in canal_painel_baus.history(limit=5):
@@ -1975,7 +2033,7 @@ async def on_ready():
             )
             await canal_painel_baus.send(embed=embed_baus, view=BauView())
 
-        # PAINEL DE CONTROLE DE ENTREGAS DE DINHEIRO SUJO
+        # Painel de controle de entregas
         canal_painel_controle = guild.get_channel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID)
         if canal_painel_controle:
             async for msg in canal_painel_controle.history(limit=5):
@@ -1986,7 +2044,7 @@ async def on_ready():
                 description="Acompanhe todas as entregas registradas.\n\n"
                             "📋 **Últimas Entregas** – mostra as 10 mais recentes.\n"
                             "📊 **Estatísticas** – resumo geral.\n"
-                            "💰 **Registrar Entrega** – registre uma entrega para qualquer membro.\n"
+                            "💰 **Registrar Entrega** – registre uma entrega para qualquer membro (por nome/ID/vulgo).\n"
                             "🔄 **Atualizar** – recarrega este painel.",
                 color=0x2c2f33
             )
@@ -1994,7 +2052,7 @@ async def on_ready():
 
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas (com suporte a vulgos).", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

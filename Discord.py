@@ -52,6 +52,9 @@ CANAL_PAINEL_BAUS_ID = 1516947055698772039
 LOG_ENTREGAS_DINHEIRO_SUJO_ID = 1516949594712440852
 PAINEL_CONTROLE_DINHEIRO_SUJO_ID = 1516949565708959835
 
+# NOVO CANAL DE LOGS PARA FARMS (PRINTS)
+LOG_FARM_ID = 1517267814854168817
+
 CARGO_ADMIN_IDS = [CARGO_00_ID, CARGO_01_ID, CARGO_02_ID, CARGO_GERENTE_ID]
 CARGO_REMOVER_MEMBRO_IDS = CARGO_ADMIN_IDS
 
@@ -190,6 +193,12 @@ async def log_entrega_dinheiro_sujo(entregador: discord.Member, recebedor, valor
         embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/196/196566.png")
         await canal.send(embed=embed)
 
+async def log_farm(embed: discord.Embed):
+    """Envia a embed do farm para o canal de logs de farm"""
+    canal = bot.get_channel(LOG_FARM_ID)
+    if canal:
+        await canal.send(embed=embed)
+
 async def limpar_logs_usuario(user_id, user_name):
     if str(user_id) in dados["usuarios_banidos"]:
         return 0
@@ -260,7 +269,7 @@ def pode_aprovar_set(member):
 def pode_remover_membro(member):
     return tem_cargo(member, CARGO_REMOVER_MEMBRO_IDS)
 
-# ========= RANKING (baseado em total de itens / 20) =========
+# ========= RANKING =========
 async def atualizar_ranking():
     canal = bot.get_channel(CHAT_RANK_ID)
     if not canal:
@@ -278,9 +287,8 @@ async def atualizar_ranking():
         for farm in farms:
             for produto in farm.get("produtos", []):
                 total_itens += produto.get("quantidade", 0)
-        rotas = total_itens // 20  # cada 20 itens = 1 rota
+        rotas = total_itens // 20
         if rotas > 0:
-            # Usar nome do registro do jogo, se disponível
             nome_registro = data.get("registro_nome")
             if nome_registro:
                 nome_exibicao = nome_registro
@@ -1056,7 +1064,7 @@ async def restaurar_canais_farms():
                     )
                     await canal.send(embed=embed, view=view)
 
-# ========= MODAL DE FARM PRODUTOS (COM PRINT DELETADO APÓS CAPTURA) =========
+# ========= MODAL DE FARM PRODUTOS =========
 class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
     relogio = TextInput(label="RELÓGIO DE LUXO - Quantidade", placeholder="Ex: 5", required=False)
     obra = TextInput(label="OBRA DE ARTE - Quantidade", placeholder="Ex: 2", required=False)
@@ -1095,7 +1103,6 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
         try:
             msg_print = await bot.wait_for('message', timeout=60.0, check=check_print)
             imagem_url = msg_print.attachments[0].url
-            # Deletar a mensagem com a print para não poluir o chat
             await msg_print.delete()
         except asyncio.TimeoutError:
             await interaction.followup.send("⏰ Tempo esgotado! Registro cancelado.", ephemeral=True)
@@ -1124,6 +1131,7 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             embed.add_field(name="📅 Data da edição", value=datetime.now().strftime("%d/%m/%Y às %H:%M"), inline=False)
             embed.set_image(url=imagem_url)
             await self.canal.send(embed=embed)
+            await log_farm(embed)  # Envia para o canal de logs de farm
             await log_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: <@{self.user_id}>\nSlot: {self.slot_num}\nProdutos: {desc}", 0x99aab5, thumbnail=interaction.user.display_avatar.url)
             await log_admin_embed("✏️ FARM PRODUTOS EDITADA", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {self.slot_num}", 0x99aab5)
             await interaction.followup.send("Farm editada com sucesso!", ephemeral=True)
@@ -1146,6 +1154,7 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             embed.set_image(url=imagem_url)
             embed.set_footer(text=f"Farm ID: {registro['farm_id']}")
             await self.canal.send(embed=embed)
+            await log_farm(embed)  # Envia para o canal de logs de farm
             await log_embed("📦 FARM PRODUTOS REGISTRADA", f"Usuário: <@{self.user_id}>\nSlot: {self.slot_num}\nProdutos: {desc}", 0x2c2f33, thumbnail=interaction.user.display_avatar.url)
             await log_admin_embed("📦 NOVA FARM PRODUTOS", f"Usuário: {interaction.user.mention}\nProdutos: {desc}\nSlot: {self.slot_num}", 0x2c2f33)
             await interaction.followup.send("Farm registrada com sucesso!", ephemeral=True)
@@ -2037,7 +2046,7 @@ async def on_ready():
 
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm (com print obrigatório e deletado), Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm (logs com print), Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

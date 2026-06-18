@@ -260,7 +260,7 @@ def pode_aprovar_set(member):
 def pode_remover_membro(member):
     return tem_cargo(member, CARGO_REMOVER_MEMBRO_IDS)
 
-# ========= RANKING =========
+# ========= RANKING (baseado em total de itens / 20) =========
 async def atualizar_ranking():
     canal = bot.get_channel(CHAT_RANK_ID)
     if not canal:
@@ -274,18 +274,27 @@ async def atualizar_ranking():
         if "removido_em" in data:
             continue
         farms = data.get("farms", [])
-        rotas = len(farms)  # cada farm = 1 rota
+        total_itens = 0
+        for farm in farms:
+            for produto in farm.get("produtos", []):
+                total_itens += produto.get("quantidade", 0)
+        rotas = total_itens // 20  # cada 20 itens = 1 rota
         if rotas > 0:
-            try:
-                if uid.startswith("vulgo_"):
-                    nome = data.get("nome", uid.replace("vulgo_", ""))
-                else:
-                    user = await bot.fetch_user(int(uid))
-                    nome = user.name
-            except:
-                nome = data.get("nome", "Usuário desconhecido")
+            # Usar nome do registro do jogo, se disponível
+            nome_registro = data.get("registro_nome")
+            if nome_registro:
+                nome_exibicao = nome_registro
+            else:
+                try:
+                    if uid.startswith("vulgo_"):
+                        nome_exibicao = data.get("nome", uid.replace("vulgo_", ""))
+                    else:
+                        user = await bot.fetch_user(int(uid))
+                        nome_exibicao = user.name
+                except:
+                    nome_exibicao = data.get("nome", "Usuário desconhecido")
             ranking.append({
-                "usuario": nome,
+                "usuario": nome_exibicao,
                 "usuario_id": uid,
                 "rotas": rotas
             })
@@ -293,7 +302,7 @@ async def atualizar_ranking():
     ranking_ordenado = sorted(ranking, key=lambda x: x["rotas"], reverse=True)[:10]
 
     embed = discord.Embed(
-        title="🏆 RANKING DE ROTAS (FARMS REGISTRADAS)",
+        title="🏆 RANKING DE ROTAS (20 ITENS = 1 ROTA)",
         description=f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
         color=0x2c2f33
     )
@@ -1047,7 +1056,7 @@ async def restaurar_canais_farms():
                     )
                     await canal.send(embed=embed, view=view)
 
-# ========= MODAL DE FARM PRODUTOS COM PRINT OBRIGATÓRIO E EXIBIÇÃO NO CHAT =========
+# ========= MODAL DE FARM PRODUTOS (COM PRINT DELETADO APÓS CAPTURA) =========
 class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
     relogio = TextInput(label="RELÓGIO DE LUXO - Quantidade", placeholder="Ex: 5", required=False)
     obra = TextInput(label="OBRA DE ARTE - Quantidade", placeholder="Ex: 2", required=False)
@@ -1086,7 +1095,8 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
         try:
             msg_print = await bot.wait_for('message', timeout=60.0, check=check_print)
             imagem_url = msg_print.attachments[0].url
-            # NÃO DELETAR a mensagem com a print – o usuário pediu para manter.
+            # Deletar a mensagem com a print para não poluir o chat
+            await msg_print.delete()
         except asyncio.TimeoutError:
             await interaction.followup.send("⏰ Tempo esgotado! Registro cancelado.", ephemeral=True)
             return
@@ -2027,7 +2037,7 @@ async def on_ready():
 
     await restaurar_canais_farms()
     await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm (com print obrigatório), Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
+    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm (com print obrigatório e deletado), Registro, Reservas, Lives, Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
 
 if __name__ == "__main__":
     carregar_dados()

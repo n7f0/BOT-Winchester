@@ -1235,7 +1235,7 @@ class SelecionarMembroView(View):
         await atualizar_ranking()
         self.stop()
 
-# ========= PAINEL DE CONTROLE DE ENTREGAS (COM BOTÃO PARA REGISTRAR) =========
+# ========= PAINEL DE CONTROLE DE ENTREGAS (COM BUSCA POR NOME/ID) =========
 class PainelControleView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1310,13 +1310,11 @@ class PainelControleView(View):
         if not is_admin(interaction.user):
             await interaction.response.send_message("Sem permissão.", ephemeral=True)
             return
-        # Abre um modal para registrar entrega para qualquer membro
         await interaction.response.send_modal(RegistrarEntregaModal())
 
     @discord.ui.button(label="🔄 Atualizar Painel", style=discord.ButtonStyle.secondary, emoji="🔄")
     async def atualizar_painel(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        # Reenvia o embed do painel
         embed = discord.Embed(
             title="💰 PAINEL DE CONTROLE - ENTREGAS DE DINHEIRO SUJO",
             description="Aqui você pode acompanhar todas as entregas registradas.\n\n"
@@ -1328,9 +1326,9 @@ class PainelControleView(View):
         )
         await interaction.followup.send(embed=embed, view=PainelControleView(), ephemeral=True)
 
-# Modal para registrar entrega diretamente do painel
+# ========= MODAL PARA REGISTRAR ENTREGA (ACEITA NOME OU ID) =========
 class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
-    membro_id = TextInput(label="ID do membro que recebe", placeholder="Digite o ID do usuário", required=True)
+    membro = TextInput(label="Nome ou ID do membro", placeholder="Digite o nome ou ID do usuário", required=True)
     valor = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
     observacao = TextInput(label="Observação (opcional)", placeholder="Detalhes sobre a entrega", required=False)
 
@@ -1340,16 +1338,28 @@ class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            target_id = int(self.membro_id.value.strip())
             valor = float(self.valor.value.replace(",", "."))
         except:
-            await interaction.followup.send("ID ou valor inválido!", ephemeral=True)
+            await interaction.followup.send("Valor inválido!", ephemeral=True)
             return
         observacao = self.observacao.value.strip() or ""
-        membro = interaction.guild.get_member(target_id)
+        membro_input = self.membro.value.strip()
+
+        # Tentar buscar por ID primeiro
+        membro = None
+        if membro_input.isdigit():
+            membro = interaction.guild.get_member(int(membro_input))
         if not membro:
-            await interaction.followup.send("Membro não encontrado!", ephemeral=True)
+            # Buscar por nome (case-insensitive, partial)
+            membro = discord.utils.get(interaction.guild.members, name=membro_input)
+            if not membro:
+                # Tentar por display_name
+                membro = discord.utils.get(interaction.guild.members, display_name=membro_input)
+        if not membro:
+            await interaction.followup.send("Membro não encontrado! Verifique o nome ou ID.", ephemeral=True)
             return
+
+        target_id = membro.id
 
         # Registrar a entrega
         if str(target_id) not in dados["usuarios"]:

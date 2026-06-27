@@ -332,27 +332,56 @@ async def atualizar_ranking():
                 "total_itens": total_itens
             })
 
-    ranking_ordenado = sorted(ranking, key=lambda x: x["rotas"], reverse=True)[:10]
+    ranking_ordenado = sorted(ranking, key=lambda x: x["rotas"], reverse=True)
 
-    embed = discord.Embed(
-        title="🏆 RANKING DE ROTAS (20 ITENS = 1 ROTA)",
-        description=f"*Bebida importada não é considerada.*\nAtualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-        color=0x2c2f33
-    )
-
-    for i, item in enumerate(ranking_ordenado, 1):
-        emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}°"
-        valor = (
-            f"**{emoji} {item['usuario']}**\n"
-            f"Rotas: {item['rotas']}\n"
-            f"Itens contados: {item['total_itens']}"
-        )
-        embed.add_field(name=f"Posição #{i}", value=valor, inline=False)
+    # Atribuir posições com suporte a empate
+    for i, item in enumerate(ranking_ordenado):
+        if i == 0:
+            item["posicao"] = 1
+        elif item["rotas"] == ranking_ordenado[i - 1]["rotas"]:
+            item["posicao"] = ranking_ordenado[i - 1]["posicao"]
+        else:
+            item["posicao"] = i + 1
 
     if not ranking_ordenado:
-        embed.description = "Nenhuma rota registrada ainda."
+        embed = discord.Embed(
+            title="🏆 RANKING DE ROTAS (20 ITENS = 1 ROTA)",
+            description=f"*Bebida importada não é considerada.*\nAtualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\nNenhuma rota registrada ainda.",
+            color=0x2c2f33
+        )
+        await canal.send(embed=embed, view=RankingView())
+        return
 
-    await canal.send(embed=embed, view=RankingView())
+    # Montar linhas do ranking em texto (suporta muito mais membros que fields)
+    linhas = []
+    for item in ranking_ordenado:
+        pos = item["posicao"]
+        emoji = "🥇" if pos == 1 else "🥈" if pos == 2 else "🥉" if pos == 3 else f"{pos}°"
+        linhas.append(f"{emoji} **{item['usuario']}** – {item['rotas']} rotas ({item['total_itens']} itens)")
+
+    total_membros = len(linhas)
+    POR_PAGINA = 25
+    chunks = [linhas[i:i + POR_PAGINA] for i in range(0, len(linhas), POR_PAGINA)]
+    total_chunks = len(chunks)
+
+    for idx, chunk in enumerate(chunks):
+        cabecalho = (
+            f"*Bebida importada não é considerada.*\n"
+            f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+            f"📊 Total de membros no ranking: **{total_membros}**"
+        )
+        if total_chunks > 1:
+            cabecalho += f"\n📄 Página {idx + 1}/{total_chunks}"
+        desc = cabecalho + "\n\n" + "\n".join(chunk)
+        embed = discord.Embed(
+            title="🏆 RANKING DE ROTAS (20 ITENS = 1 ROTA)",
+            description=desc,
+            color=0x2c2f33
+        )
+        if idx == total_chunks - 1:
+            await canal.send(embed=embed, view=RankingView())
+        else:
+            await canal.send(embed=embed)
 
 class RankingView(View):
     def __init__(self):
@@ -1440,13 +1469,100 @@ class SelecionarMembroView(View):
         await atualizar_ranking()
         self.stop()
 
+# ========= HISTÓRICO PAGINADO DE ENTREGAS =========
+class HistoricoEntregasView(View):
+    def __init__(self, todas_entregas, pagina=0):
+        super().__init__(timeout=300)
+        self.todas = todas_entregas
+        self.pagina = pagina
+        self.por_pagina = 8
+        self.total_paginas = max(1, (len(todas_entregas) + self.por_pagina - 1) // self.por_pagina)
+        self._atualizar_botoes()
+
+    def _atualizar_botoes(self):
+        self.clear_items()
+        if self.pagina > 0:
+            btn_ant = Button(label="◀ Anterior", style=discord.ButtonStyle.secondary)
+            btn_ant.callback = self.pagina_anterior
+            self.add_item(btn_ant)
+        if self.pagina < self.total_paginas - 1:
+            btn_prox = Button(label="Próximo ▶", style=discord.ButtonStyle.secondary)
+            btn_prox.callback = self.proxima_pagina
+            self.add_item(btn_prox)
+
+    def build_embed(self):
+        inicio = self.pagina * self.por_pagina
+        fim = min(inicio + self.por_pagina, len(self.todas))
+        pagina_entregas = self.todas[inicio:fim]
+        embed = discord.Embed(
+            title="📋 HISTÓRICO COMPLETO DE ENTREGAS",
+            description=(
+                f"Total: **{len(self.todas)}** entregas | "
+                f"Página **{self.pagina + 1}/{self.total_paginas}** | "
+                f"Mostrando #{inicio + 1} a #{fim}"
+            ),
+            color=0x2c2f33,
+            timestamp=datetime.now()
+        )
+        for i, entrega in enumerate(pagina_entregas, inicio + 1):
+            desc = (
+                f"**Entregador:** {entrega['entregador']}\n"
+                f"**Recebedor:** {entrega['recebedor']}\n"
+                f"**Valor:** R$ {entrega['valor']:,.2f}\n"
+                f"**Data:** {entrega['data']}\n"
+                f"**Obs:** {entrega['observacao'] or 'Nenhuma'}"
+            )
+            embed.add_field(name=f"Entrega #{i}", value=desc, inline=False)
+        return embed
+
+    async def pagina_anterior(self, interaction: discord.Interaction):
+        self.pagina -= 1
+        self._atualizar_botoes()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def proxima_pagina(self, interaction: discord.Interaction):
+        self.pagina += 1
+        self._atualizar_botoes()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+
+class ConfirmarResetHistoricoView(View):
+    def __init__(self):
+        super().__init__(timeout=60)
+
+    @discord.ui.button(label="✅ Sim, resetar histórico", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def confirmar(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Sem permissão.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        for uid in dados["usuarios"]:
+            if "transacoes_dinheiro_sujo" in dados["usuarios"][uid]:
+                dados["usuarios"][uid]["transacoes_dinheiro_sujo"] = []
+                dados["usuarios"][uid]["dinheiro_sujo"] = 0.0
+        salvar_dados()
+        await log_admin_embed(
+            "🗑️ HISTÓRICO DE ENTREGAS RESETADO",
+            f"Histórico de entregas de dinheiro sujo resetado por {interaction.user.mention}\nData: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            0x4f545c
+        )
+        await interaction.followup.send("✅ Histórico de entregas resetado com sucesso!", ephemeral=True)
+        self.stop()
+
+    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.secondary, emoji="❌")
+    async def cancelar(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message("Operação cancelada.", ephemeral=True)
+        self.stop()
+
+
 # ========= PAINEL DE CONTROLE DE ENTREGAS =========
 class PainelControleView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="📋 Últimas Entregas", style=discord.ButtonStyle.primary, emoji="📋")
+    @discord.ui.button(label="📋 Histórico Completo", style=discord.ButtonStyle.primary, emoji="📋")
     async def ultimas_entregas(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
         todas = []
         for uid, data in dados["usuarios"].items():
             for t in data.get("transacoes_dinheiro_sujo", []):
@@ -1467,50 +1583,49 @@ class PainelControleView(View):
                     "observacao": t.get("observacao", "")
                 })
         todas.sort(key=lambda x: x["data"], reverse=True)
-        ultimas = todas[:10]
 
-        if not ultimas:
+        if not todas:
             embed = discord.Embed(
-                title="📋 ÚLTIMAS ENTREGAS",
+                title="📋 HISTÓRICO DE ENTREGAS",
                 description="Nenhuma entrega registrada ainda.",
                 color=0x2c2f33
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title="📋 ÚLTIMAS ENTREGAS DE DINHEIRO SUJO",
-            description=f"Mostrando as {len(ultimas)} mais recentes.",
-            color=0x2c2f33,
-            timestamp=datetime.now()
-        )
-        for i, entrega in enumerate(ultimas, 1):
-            desc = (
-                f"**Entregador:** {entrega['entregador']}\n"
-                f"**Recebedor:** {entrega['recebedor']}\n"
-                f"**Valor:** R$ {entrega['valor']:,.2f}\n"
-                f"**Data:** {entrega['data']}\n"
-                f"**Obs:** {entrega['observacao'] or 'Nenhuma'}"
-            )
-            embed.add_field(name=f"Entrega #{i}", value=desc, inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        hist_view = HistoricoEntregasView(todas)
+        embed = hist_view.build_embed()
+        await interaction.followup.send(embed=embed, view=hist_view, ephemeral=True)
 
     @discord.ui.button(label="📊 Estatísticas", style=discord.ButtonStyle.secondary, emoji="📊")
     async def estatisticas(self, interaction: discord.Interaction, button: Button):
         total_entregas = 0
         valor_total = 0.0
+        por_pessoa = {}
         for uid, data in dados["usuarios"].items():
             transacoes = data.get("transacoes_dinheiro_sujo", [])
+            if not transacoes:
+                continue
             total_entregas += len(transacoes)
-            valor_total += sum(t["valor"] for t in transacoes)
+            valor_pessoa = sum(t["valor"] for t in transacoes)
+            valor_total += valor_pessoa
+            nome = data.get("registro_nome") or data.get("nome", f"ID {uid}")
+            por_pessoa[nome] = {"qtd": len(transacoes), "valor": valor_pessoa}
 
         embed = discord.Embed(
             title="📊 ESTATÍSTICAS DE ENTREGAS",
             color=0x2c2f33,
             timestamp=datetime.now()
         )
-        embed.add_field(name="Total de entregas", value=str(total_entregas), inline=True)
-        embed.add_field(name="Valor total entregue", value=f"R$ {valor_total:,.2f}", inline=True)
+        embed.add_field(name="📦 Total de entregas", value=str(total_entregas), inline=True)
+        embed.add_field(name="💰 Valor total entregue", value=f"R$ {valor_total:,.2f}", inline=True)
+        if por_pessoa:
+            top = sorted(por_pessoa.items(), key=lambda x: x[1]["valor"], reverse=True)[:10]
+            lista = "\n".join(
+                f"**{nome}**: R$ {info['valor']:,.2f} ({info['qtd']} entregas)"
+                for nome, info in top
+            )
+            embed.add_field(name="🏆 Top 10 por valor entregue", value=lista or "—", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="💰 Registrar Entrega", style=discord.ButtonStyle.success, emoji="💰")
@@ -1525,14 +1640,28 @@ class PainelControleView(View):
         await interaction.response.defer()
         embed = discord.Embed(
             title="💰 PAINEL DE CONTROLE - ENTREGAS DE DINHEIRO SUJO",
-            description="Acompanhe todas as entregas registradas.\n\n"
-                        "📋 **Últimas Entregas** – mostra as 10 mais recentes.\n"
-                        "📊 **Estatísticas** – resumo geral.\n"
-                        "💰 **Registrar Entrega** – registre uma entrega para qualquer membro (por nome/ID/vulgo).\n"
-                        "🔄 **Atualizar** – recarrega este painel.",
+            description=(
+                "Acompanhe todas as entregas registradas.\n\n"
+                "📋 **Histórico Completo** – histórico sem limite, com paginação (◀ ▶).\n"
+                "📊 **Estatísticas** – resumo geral e top 10 por valor.\n"
+                "💰 **Registrar Entrega** – registre uma entrega (nome/ID/vulgo).\n"
+                "🔄 **Atualizar** – recarrega este painel.\n"
+                "🗑️ **Resetar Histórico** – apaga todo o histórico (apenas admins)."
+            ),
             color=0x2c2f33
         )
         await interaction.followup.send(embed=embed, view=PainelControleView(), ephemeral=True)
+
+    @discord.ui.button(label="🗑️ Resetar Histórico", style=discord.ButtonStyle.danger, emoji="🗑️", row=1)
+    async def resetar_historico(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Apenas administradores podem resetar o histórico.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "⚠️ **ATENÇÃO!** Isso apagará **TODO** o histórico de entregas de dinheiro sujo de todos os membros. Esta ação não pode ser desfeita. Deseja continuar?",
+            view=ConfirmarResetHistoricoView(),
+            ephemeral=True
+        )
 
 class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
     membro = TextInput(label="Nome do recebedor (vulgo ou ID)", placeholder="Digite o nome, vulgo ou ID", required=True)
@@ -1819,413 +1948,4 @@ class BotaoCriarCanalView(View):
             cargo_admin = interaction.guild.get_role(CARGO_00_ID)
             if cargo_admin:
                 overwrites[cargo_admin] = discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True, manage_channels=True)
-            canal = await categoria.create_text_channel(nome_canal, overwrites=overwrites)
-            dados["canais"][user_id] = canal.id
-            salvar_dados()
-            view = FarmChannelView(interaction.user.id, interaction.user.name, canal.id)
-            embed = discord.Embed(
-                title="📦 SEU CANAL PRIVADO",
-                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Depositar Farm\n✏️ Editar Registro\n📋 Meus Registros\n🔄 Reset Semanal",
-                color=0x2c2f33
-            )
-            await canal.send(embed=embed, view=view)
-            await log_embed("📦 CANAL CRIADO", f"{interaction.user.mention} criou seu canal privado: {canal.mention}", 0x2c2f33, thumbnail=interaction.user.display_avatar.url)
-            await log_admin_embed("📦 CANAL CRIADO", f"Usuário: {interaction.user.mention}\nCanal: {canal.mention}", 0x2c2f33)
-            await interaction.followup.send(f"✅ Canal criado! Acesse: {canal.mention}", ephemeral=True)
-            await atualizar_ranking()
-        except Exception as e:
-            await interaction.followup.send(f"Erro: {str(e)[:200]}", ephemeral=True)
-
-# ========= RESERVAS CLIENTES =========
-class ReservaView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-    @discord.ui.button(label="Nova reserva", style=discord.ButtonStyle.success, emoji="💸")
-    async def nova_reserva(self, interaction: discord.Interaction, button: Button):
-        if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem criar reservas.", ephemeral=True)
-            return
-        await interaction.response.send_modal(NovaReservaModal())
-    @discord.ui.button(label="Editar Porcentagens", style=discord.ButtonStyle.primary, emoji="⚙️")
-    async def editar_porcentagens(self, interaction: discord.Interaction, button: Button):
-        if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem editar porcentagens.", ephemeral=True)
-            return
-        await interaction.response.send_modal(EditarPorcentagensModal())
-
-class NovaReservaModal(Modal, title="💸 Nova Reserva (Cliente)"):
-    cliente = TextInput(label="Nome do Cliente", required=True)
-    valor_total = TextInput(label="Valor Total Sujo (R$)", required=True)
-    prazo_entrega = TextInput(label="Prazo de Entrega", required=True)
-    descontado_caixa = TextInput(label="Descontado do Caixa? (Sim/Não/Pendente)", required=True)
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            valor = float(self.valor_total.value.replace(",", "."))
-        except:
-            await interaction.followup.send("Valor inválido!", ephemeral=True)
-            return
-        descontado = self.descontado_caixa.value.strip().capitalize()
-        if descontado not in ["Sim", "Não", "Pendente"]:
-            await interaction.followup.send("Descontado deve ser Sim, Não ou Pendente.", ephemeral=True)
-            return
-        pcts = dados["pedidos"]["config"]["porcentagens"]
-        vip = pcts.get("vip_fac", 0)
-        fac_percent = pcts["fac"] + vip
-        cliente_part = valor * pcts["cliente"] / 100
-        maquina_part = valor * pcts["maquina"] / 100
-        fac_part = valor * fac_percent / 100
-        membros_part = valor * pcts["membros"] / 100
-        reserva = {
-            "id": len(dados["pedidos"]["lista"]) + 1,
-            "cliente": self.cliente.value.strip(),
-            "valor_total": valor,
-            "prazo_entrega": self.prazo_entrega.value.strip(),
-            "descontado_caixa": descontado,
-            "data_criacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "criado_por": interaction.user.id,
-            "distribuicao": {"cliente": cliente_part, "maquina": maquina_part, "fac": fac_part, "membros": membros_part, "vip_fac": vip},
-            "pago": False
-        }
-        dados["pedidos"]["lista"].append(reserva)
-        salvar_dados()
-        embed = discord.Embed(title="💸 NOVA RESERVA (CLIENTE)", color=0x2c2f33, timestamp=datetime.now())
-        embed.add_field(name="Cliente", value=reserva["cliente"], inline=True)
-        embed.add_field(name="Valor Total", value=f"R$ {valor:,.2f}", inline=True)
-        embed.add_field(name="Prazo", value=reserva["prazo_entrega"], inline=True)
-        embed.add_field(name="Descontado", value=descontado, inline=True)
-        distrib = f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({fac_percent}% incluindo VIP {vip}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)"
-        embed.add_field(name="Distribuição", value=distrib, inline=False)
-        embed.set_footer(text=f"Reserva #{reserva['id']} - Criado por {interaction.user.name}")
-        await interaction.followup.send(embed=embed, ephemeral=True)
-        await log_reserva_cliente_embed(
-            "💸 NOVA RESERVA (CLIENTE)",
-            f"Reserva #{reserva['id']} criada por {interaction.user.mention}",
-            0x2c2f33,
-            fields=[
-                ("Cliente", reserva["cliente"], True),
-                ("Valor Total", f"R$ {valor:,.2f}", True),
-                ("Prazo", reserva["prazo_entrega"], True),
-                ("Descontado", descontado, True),
-                ("Distribuição", f"Cliente: R$ {cliente_part:,.2f} ({pcts['cliente']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({fac_percent}% incluindo VIP {vip}%)\nMembros: R$ {membros_part:,.2f} ({pcts['membros']}%)", False)
-            ]
-        )
-        await log_admin_embed("💸 NOVA RESERVA (CLIENTE)", f"Reserva #{reserva['id']} criada por {interaction.user.mention}", 0x2c2f33)
-
-class EditarPorcentagensModal(Modal, title="⚙️ Editar Porcentagens e VIP"):
-    cliente = TextInput(label="% Cliente", default="50", required=True)
-    maquina = TextInput(label="% Máquina", default="40", required=True)
-    fac = TextInput(label="% Facção", default="5", required=True)
-    membros = TextInput(label="% Membros", default="5", required=True)
-    vip_fac = TextInput(label="% VIP Fac (bônus)", default="10", required=True)
-    async def on_submit(self, interaction: discord.Interaction):
-        if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Sem permissão.", ephemeral=True)
-            return
-        try:
-            pcts = {
-                "cliente": float(self.cliente.value.replace(",", ".")),
-                "maquina": float(self.maquina.value.replace(",", ".")),
-                "fac": float(self.fac.value.replace(",", ".")),
-                "membros": float(self.membros.value.replace(",", ".")),
-                "vip_fac": float(self.vip_fac.value.replace(",", "."))
-            }
-            dados["pedidos"]["config"]["porcentagens"] = pcts
-            dados["pedidos"]["config"]["ultima_edicao"] = {"por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-            salvar_dados()
-            total = pcts["cliente"] + pcts["maquina"] + pcts["fac"] + pcts["membros"] + pcts["vip_fac"]
-            await interaction.response.send_message(f"✅ Porcentagens atualizadas!\nCliente {pcts['cliente']}% | Máquina {pcts['maquina']}% | Facção {pcts['fac']}% | Membros {pcts['membros']}% | VIP Fac {pcts['vip_fac']}% (total {total}%)", ephemeral=True)
-            await log_reserva_cliente_embed(
-                "⚙️ PORCENTAGENS EDITADAS (CLIENTE)",
-                f"Porcentagens editadas por {interaction.user.mention}",
-                0x2c2f33,
-                fields=[
-                    ("Cliente", f"{pcts['cliente']}%", True),
-                    ("Máquina", f"{pcts['maquina']}%", True),
-                    ("Facção", f"{pcts['fac']}%", True),
-                    ("Membros", f"{pcts['membros']}%", True),
-                    ("VIP Fac", f"{pcts['vip_fac']}%", True),
-                    ("Total", f"{total}%", True)
-                ]
-            )
-            await log_admin_embed("⚙️ PORCENTAGENS EDITADAS (CLIENTE)", f"Novas porcentagens: Cliente {pcts['cliente']}%, Máquina {pcts['maquina']}%, Facção {pcts['fac']}%, Membros {pcts['membros']}%, VIP Fac {pcts['vip_fac']}%", 0x2c2f33)
-        except ValueError:
-            await interaction.response.send_message("Valores inválidos. Use números.", ephemeral=True)
-
-# ========= RESERVAS FUNCIONÁRIOS =========
-class ReservaFuncView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-    @discord.ui.button(label="Nova reserva (Func)", style=discord.ButtonStyle.success, emoji="💸")
-    async def nova_reserva_func(self, interaction: discord.Interaction, button: Button):
-        if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem criar reservas de funcionários.", ephemeral=True)
-            return
-        await interaction.response.send_modal(NovaReservaFuncModal())
-    @discord.ui.button(label="Editar Porcentagens (Func)", style=discord.ButtonStyle.primary, emoji="⚙️")
-    async def editar_porcentagens_func(self, interaction: discord.Interaction, button: Button):
-        if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Apenas cargos 00,01,02 ou Gerente podem editar porcentagens.", ephemeral=True)
-            return
-        await interaction.response.send_modal(EditarPorcentagensFuncModal())
-
-class NovaReservaFuncModal(Modal, title="💸 Nova Reserva (Funcionário)"):
-    funcionario = TextInput(label="Nome do Funcionário", required=True)
-    valor_total = TextInput(label="Valor Total Sujo (R$)", required=True)
-    prazo_entrega = TextInput(label="Prazo de Entrega", required=True)
-    descontado_caixa = TextInput(label="Descontado do Caixa? (Sim/Não/Pendente)", required=True)
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            valor = float(self.valor_total.value.replace(",", "."))
-        except:
-            await interaction.followup.send("Valor inválido!", ephemeral=True)
-            return
-        descontado = self.descontado_caixa.value.strip().capitalize()
-        if descontado not in ["Sim", "Não", "Pendente"]:
-            await interaction.followup.send("Descontado deve ser Sim, Não ou Pendente.", ephemeral=True)
-            return
-        pcts = dados["pedidos_funcionarios"]["config"]["porcentagens"]
-        vip = pcts.get("vip_fac", 0)
-        fac_percent = pcts["fac"] + vip
-        func_part = valor * pcts["funcionario"] / 100
-        maquina_part = valor * pcts["maquina"] / 100
-        fac_part = valor * fac_percent / 100
-        reserva = {
-            "id": len(dados["pedidos_funcionarios"]["lista"]) + 1,
-            "funcionario": self.funcionario.value.strip(),
-            "valor_total": valor,
-            "prazo_entrega": self.prazo_entrega.value.strip(),
-            "descontado_caixa": descontado,
-            "data_criacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "criado_por": interaction.user.id,
-            "distribuicao": {"funcionario": func_part, "maquina": maquina_part, "fac": fac_part, "vip_fac": vip},
-            "pago": False
-        }
-        dados["pedidos_funcionarios"]["lista"].append(reserva)
-        salvar_dados()
-        embed = discord.Embed(title="💸 NOVA RESERVA (FUNCIONÁRIO)", color=0x2c2f33, timestamp=datetime.now())
-        embed.add_field(name="Funcionário", value=reserva["funcionario"], inline=True)
-        embed.add_field(name="Valor Total", value=f"R$ {valor:,.2f}", inline=True)
-        embed.add_field(name="Prazo", value=reserva["prazo_entrega"], inline=True)
-        embed.add_field(name="Descontado", value=descontado, inline=True)
-        distrib = f"Funcionário: R$ {func_part:,.2f} ({pcts['funcionario']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({fac_percent}% incluindo VIP {vip}%)"
-        embed.add_field(name="Distribuição", value=distrib, inline=False)
-        embed.set_footer(text=f"Reserva #{reserva['id']} - Criado por {interaction.user.name}")
-        await interaction.followup.send(embed=embed, ephemeral=True)
-        await log_reserva_func_embed(
-            "💸 NOVA RESERVA (FUNCIONÁRIO)",
-            f"Reserva #{reserva['id']} criada por {interaction.user.mention}",
-            0x2c2f33,
-            fields=[
-                ("Funcionário", reserva["funcionario"], True),
-                ("Valor Total", f"R$ {valor:,.2f}", True),
-                ("Prazo", reserva["prazo_entrega"], True),
-                ("Descontado", descontado, True),
-                ("Distribuição", f"Funcionário: R$ {func_part:,.2f} ({pcts['funcionario']}%)\nMáquina: R$ {maquina_part:,.2f} ({pcts['maquina']}%)\nFacção: R$ {fac_part:,.2f} ({fac_percent}% incluindo VIP {vip}%)", False)
-            ]
-        )
-        await log_admin_embed("💸 NOVA RESERVA (FUNCIONÁRIO)", f"Reserva #{reserva['id']} criada por {interaction.user.mention}", 0x2c2f33)
-
-class EditarPorcentagensFuncModal(Modal, title="⚙️ Editar Porcentagens (Funcionários)"):
-    funcionario = TextInput(label="% Funcionário", default="50", required=True)
-    maquina = TextInput(label="% Máquina", default="40", required=True)
-    fac = TextInput(label="% Facção", default="5", required=True)
-    vip_fac = TextInput(label="% VIP Fac (bônus)", default="10", required=True)
-    async def on_submit(self, interaction: discord.Interaction):
-        if not pode_registrar_acao(interaction.user):
-            await interaction.response.send_message("Sem permissão.", ephemeral=True)
-            return
-        try:
-            pcts = {
-                "funcionario": float(self.funcionario.value.replace(",", ".")),
-                "maquina": float(self.maquina.value.replace(",", ".")),
-                "fac": float(self.fac.value.replace(",", ".")),
-                "vip_fac": float(self.vip_fac.value.replace(",", "."))
-            }
-            dados["pedidos_funcionarios"]["config"]["porcentagens"] = pcts
-            dados["pedidos_funcionarios"]["config"]["ultima_edicao"] = {"por": interaction.user.id, "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-            salvar_dados()
-            total = pcts["funcionario"] + pcts["maquina"] + pcts["fac"] + pcts["vip_fac"]
-            await interaction.response.send_message(f"✅ Porcentagens (Funcionários) atualizadas!\nFuncionário {pcts['funcionario']}% | Máquina {pcts['maquina']}% | Facção {pcts['fac']}% | VIP Fac {pcts['vip_fac']}% (total {total}%)", ephemeral=True)
-            await log_reserva_func_embed(
-                "⚙️ PORCENTAGENS EDITADAS (FUNCIONÁRIOS)",
-                f"Porcentagens editadas por {interaction.user.mention}",
-                0x2c2f33,
-                fields=[
-                    ("Funcionário", f"{pcts['funcionario']}%", True),
-                    ("Máquina", f"{pcts['maquina']}%", True),
-                    ("Facção", f"{pcts['fac']}%", True),
-                    ("VIP Fac", f"{pcts['vip_fac']}%", True),
-                    ("Total", f"{total}%", True)
-                ]
-            )
-            await log_admin_embed("⚙️ PORCENTAGENS EDITADAS (FUNCIONÁRIOS)", f"Novas porcentagens: Funcionário {pcts['funcionario']}%, Máquina {pcts['maquina']}%, Facção {pcts['fac']}%, VIP Fac {pcts['vip_fac']}%", 0x2c2f33)
-        except ValueError:
-            await interaction.response.send_message("Valores inválidos. Use números.", ephemeral=True)
-
-# ========= REMOÇÃO DE MEMBRO =========
-class RemoverUsuarioModal(Modal, title="🗑️ Remover Usuário"):
-    user_id = TextInput(label="ID do usuário", required=True)
-    async def on_submit(self, interaction: discord.Interaction):
-        if not pode_remover_membro(interaction.user):
-            await interaction.response.send_message("Você não tem permissão para remover membros.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            uid = int(self.user_id.value.strip())
-            user = await bot.fetch_user(uid)
-            if str(uid) in dados["usuarios_banidos"]:
-                await interaction.followup.send("Usuário já removido!", ephemeral=True)
-                return
-            total = await limpar_logs_usuario(uid, user.name)
-            await interaction.followup.send(f"✅ {user.mention} removido! {total} logs limpos.", ephemeral=True)
-            await log_admin_embed("🗑️ USUÁRIO REMOVIDO", f"{user.mention} removido por {interaction.user.mention}\nLogs limpos: {total}", 0x4f545c)
-            await atualizar_ranking()
-        except Exception as e:
-            await interaction.followup.send(f"Erro: {e}", ephemeral=True)
-
-# ========= EVENTOS =========
-@bot.event
-async def on_member_remove(member):
-    if str(member.id) in dados["usuarios_banidos"]:
-        return
-    await log_admin_embed("👋 USUÁRIO SAIU", f"{member.mention} saiu do servidor. Iniciando limpeza...", 0x4f545c)
-    await limpar_logs_usuario(member.id, member.name)
-    if str(member.id) in dados["canais"]:
-        canal = member.guild.get_channel(dados["canais"][str(member.id)])
-        if canal:
-            try:
-                await canal.delete(reason=f"Usuário {member.name} saiu")
-            except:
-                pass
-        del dados["canais"][str(member.id)]
-        salvar_dados()
-    await log_admin_embed("🧹 LIMPEZA CONCLUÍDA", f"Usuário {member.mention} removido do sistema.", 0x4f545c)
-
-@bot.event
-async def on_ready():
-    print(f"✅ Bot {bot.user} online!")
-    live_check_loop.start()
-
-    for guild in bot.guilds:
-        # Painel criar canal
-        canal_criar = guild.get_channel(CANAL_CRIAR_FARM_ID)
-        if canal_criar:
-            async for msg in canal_criar.history(limit=5):
-                if msg.author == bot.user:
-                    await msg.delete()
-            embed_criar = discord.Embed(
-                title="📦 SISTEMA DE FARM",
-                description="Clique no botão abaixo para criar seu canal privado!",
-                color=0x2c2f33
-            )
-            await canal_criar.send(embed=embed_criar, view=BotaoCriarCanalView())
-
-        # Painel de Registro
-        canal_set = guild.get_channel(CANAL_SOLICITAR_SET_ID)
-        if canal_set:
-            async for msg in canal_set.history(limit=5):
-                if msg.author == bot.user:
-                    await msg.delete()
-            embed_set = discord.Embed(
-                title="📋 REGISTRO",
-                description="Clique no botão abaixo para fazer seu registro. Preencha seu ID e nome no jogo.",
-                color=0x2c2f33
-            )
-            view = View(timeout=None)
-            button = Button(label="📝 Registro", style=discord.ButtonStyle.success, emoji="📝")
-            async def button_callback(interaction):
-                await interaction.response.send_modal(SolicitarSetModal())
-            button.callback = button_callback
-            view.add_item(button)
-            await canal_set.send(embed=embed_set, view=view)
-
-        # Painel de Reservas (Clientes)
-        canal_reservas_clientes = guild.get_channel(CANAL_RESERVAS_CLIENTES_ID)
-        if canal_reservas_clientes:
-            async for msg in canal_reservas_clientes.history(limit=5):
-                if msg.author == bot.user:
-                    await msg.delete()
-            embed_reservas = discord.Embed(
-                title="💸 SISTEMA DE RESERVAS (CLIENTES)",
-                description="Gerencie reserva de clientes.\n\n**Botões:**\n💸 Nova reserva\n⚙️ Editar Porcentagens (inclui VIP Fac)",
-                color=0x2c2f33
-            )
-            await canal_reservas_clientes.send(embed=embed_reservas, view=ReservaView())
-
-        # Painel de Reservas Funcionários
-        canal_reservas_func = guild.get_channel(CANAL_RESERVAS_FUNC_PAINEL_ID)
-        if canal_reservas_func:
-            async for msg in canal_reservas_func.history(limit=5):
-                if msg.author == bot.user:
-                    await msg.delete()
-            embed_reservas_func = discord.Embed(
-                title="💸 SISTEMA DE RESERVAS (FUNCIONÁRIOS)",
-                description="Gerencie reserva de funcionários.\n\n**Botões:**\n💸 Nova reserva (Func)\n⚙️ Editar Porcentagens (Func) – sem % Membros",
-                color=0x2c2f33
-            )
-            await canal_reservas_func.send(embed=embed_reservas_func, view=ReservaFuncView())
-
-        # Painel de Lives
-        canal_lives = guild.get_channel(CANAL_LIVES_PAINEL_ID)
-        if canal_lives:
-            async for msg in canal_lives.history(limit=5):
-                if msg.author == bot.user:
-                    await msg.delete()
-            view_lives = LiveConfigView(guild.id)
-            embed_lives = await view_lives.build_embed()
-            await canal_lives.send(embed=embed_lives, view=view_lives)
-
-        # Painel de Compra e Venda
-        canal_compra_venda = guild.get_channel(CANAL_COMPRA_VENDA_ID)
-        if canal_compra_venda:
-            async for msg in canal_compra_venda.history(limit=5):
-                if msg.author == bot.user:
-                    await msg.delete()
-            embed_compra_venda = discord.Embed(
-                title="💸 SISTEMA DE COMPRA E VENDA",
-                description="Clique nos botões para registrar:\n\n"
-                            "💸 **Venda** – venda de qualquer item.\n"
-                            "🛒 **Compra** – compra de produtos diversos.",
-                color=0x2c2f33
-            )
-            await canal_compra_venda.send(embed=embed_compra_venda, view=CompraVendaView())
-
-        # Painel de Baús
-        canal_painel_baus = guild.get_channel(CANAL_PAINEL_BAUS_ID)
-        if canal_painel_baus:
-            async for msg in canal_painel_baus.history(limit=5):
-                if msg.author == bot.user:
-                    await msg.delete()
-            embed_baus = discord.Embed(
-                title="📦 SISTEMA DE BAÚS",
-                description="Registre itens nos baús específicos.",
-                color=0x2c2f33
-            )
-            await canal_painel_baus.send(embed=embed_baus, view=BauView())
-
-        # Painel de controle de entregas
-        canal_painel_controle = guild.get_channel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID)
-        if canal_painel_controle:
-            async for msg in canal_painel_controle.history(limit=5):
-                if msg.author == bot.user:
-                    await msg.delete()
-            embed_controle = discord.Embed(
-                title="💰 PAINEL DE CONTROLE - ENTREGAS DE DINHEIRO SUJO",
-                description="Acompanhe todas as entregas registradas.\n\n"
-                            "📋 **Últimas Entregas** – mostra as 10 mais recentes.\n"
-                            "📊 **Estatísticas** – resumo geral.\n"
-                            "💰 **Registrar Entrega** – registre uma entrega para qualquer membro (por nome/ID/vulgo).\n"
-                            "🔄 **Atualizar** – recarrega este painel.",
-                color=0x2c2f33
-            )
-            await canal_painel_controle.send(embed=embed_controle, view=PainelControleView())
-
-    await restaurar_canais_farms()
-    await atualizar_ranking()
-    await log_admin_embed("🤖 BOT INICIADO", f"Bot {bot.user.mention} online!\nSistemas ativos: Farm, Registro, Reservas, Lives (múltiplos streamers), Compra/Venda, Baús, Controle de Entregas.", 0x2c2f33)
-
-if __name__ == "__main__":
-    carregar_dados()
-    bot.run(TOKEN)
+       

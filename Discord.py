@@ -84,7 +84,8 @@ dados = {
         "last_notified": {},
         "status": {}
     },
-    "compras_vendas": []
+    "compras_vendas": [],
+    "painels": {}  # Novo: armazena IDs das mensagens de cada painel
 }
 
 def salvar_dados():
@@ -123,6 +124,8 @@ def carregar_dados():
                 dados["pedidos"]["config"]["porcentagens"]["vip_fac"] = 10
             if "vip_fac" not in dados["pedidos_funcionarios"]["config"]["porcentagens"]:
                 dados["pedidos_funcionarios"]["config"]["porcentagens"]["vip_fac"] = 10
+            if "painels" not in dados:
+                dados["painels"] = {}
         return True
     except:
         return False
@@ -1132,7 +1135,6 @@ class BotaoCriarCanalView(View):
             dados["canais"][user_id] = canal_novo.id
             salvar_dados()
 
-            # Usa a view persistente
             embed = discord.Embed(
                 title="📦 SEU CANAL PRIVADO",
                 description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Depositar Farm\n✏️ Editar Registro\n📋 Meus Registros\n🔄 Reset Semanal",
@@ -1151,7 +1153,7 @@ async def restaurar_canais_farms():
         if canal:
             # Verifica se já existe mensagem do bot com a view
             mensagem_existente = False
-            async for msg in canal.history(limit=10):
+            async for msg in canal.history(limit=20):
                 if msg.author == bot.user and msg.components:
                     mensagem_existente = True
                     break
@@ -1166,19 +1168,41 @@ async def restaurar_canais_farms():
                     )
                     await canal.send(embed=embed, view=FarmChannelViewPersistent())
 
-# ========= FUNÇÃO PARA ENVIAR PAINÉIS AUTOMATICAMENTE =========
-async def enviar_painel_se_necessario(canal_id, view, embed_titulo, embed_descricao, cor=0x2c2f33):
-    """Envia um painel com a view se não houver mensagem do bot com componentes no canal."""
+# ========= FUNÇÃO PARA ENVIAR PAINÉIS COM PERSISTÊNCIA =========
+async def enviar_ou_restaurar_painel(canal_id, view, embed_titulo, embed_descricao, chave_painel, cor=0x2c2f33):
+    """
+    Envia o painel se a mensagem salva não existir mais.
+    Atualiza o ID da mensagem no dicionário de painéis.
+    """
     canal = bot.get_channel(canal_id)
     if not canal:
+        print(f"[PAINEL] Canal {canal_id} não encontrado.")
         return
-    # Verifica se já existe uma mensagem do bot com componentes
-    async for msg in canal.history(limit=20):
-        if msg.author == bot.user and msg.components:
-            return  # já existe
-    # Envia o painel
-    embed = discord.Embed(title=embed_titulo, description=embed_descricao, color=cor)
-    await canal.send(embed=embed, view=view)
+
+    # Verifica se temos um ID salvo para este painel
+    msg_id = dados["painels"].get(chave_painel)
+    mensagem_existente = False
+
+    if msg_id:
+        try:
+            msg = await canal.fetch_message(msg_id)
+            if msg.author == bot.user and msg.components:
+                mensagem_existente = True
+        except discord.NotFound:
+            mensagem_existente = False
+        except discord.Forbidden:
+            print(f"[PAINEL] Sem permissão para acessar mensagem {msg_id} no canal {canal_id}")
+            mensagem_existente = False
+
+    if not mensagem_existente:
+        # Se não existir, envia nova e salva o ID
+        embed = discord.Embed(title=embed_titulo, description=embed_descricao, color=cor)
+        msg = await canal.send(embed=embed, view=view)
+        dados["painels"][chave_painel] = msg.id
+        salvar_dados()
+        print(f"[PAINEL] Painel '{chave_painel}' enviado/restaurado no canal {canal_id}.")
+    else:
+        print(f"[PAINEL] Painel '{chave_painel}' já existe (ID {msg_id}).")
 
 # ========= INICIALIZAÇÃO E EVENTOS =========
 async def setup_hook():
@@ -1188,7 +1212,7 @@ async def setup_hook():
     bot.add_view(BauView())
     bot.add_view(PainelControleView())
     bot.add_view(BotaoCriarCanalView())
-    bot.add_view(FarmChannelViewPersistent())  # view persistente para canais privados
+    bot.add_view(FarmChannelViewPersistent())
 
 bot.setup_hook = setup_hook
 
@@ -1200,37 +1224,48 @@ async def on_ready():
     if not live_check_loop.is_running():
         live_check_loop.start()
     
-    # Envia os painéis principais se não existirem
-    await enviar_painel_se_necessario(
+    # Restaura/recria os painéis principais
+    await enviar_ou_restaurar_painel(
         CANAL_COMPRA_VENDA_ID,
         CompraVendaView(),
         "💸 COMPRA E VENDA",
         "Clique nos botões abaixo para registrar uma **venda** ou **compra** de produtos.",
+        "compra_venda",
         0x2c2f33
     )
-    await enviar_painel_se_necessario(
+    await enviar_ou_restaurar_painel(
         CANAL_PAINEL_BAUS_ID,
         BauView(),
         "📦 BAÚS",
         "Selecione o tipo de baú para registrar itens.",
+        "baus",
         0x2c2f33
     )
-    await enviar_painel_se_necessario(
+    await enviar_ou_restaurar_painel(
         PAINEL_CONTROLE_DINHEIRO_SUJO_ID,
         PainelControleView(),
         "💰 CONTROLE DE DINHEIRO SUJO",
         "Gerencie entregas de dinheiro sujo.",
+        "dinheiro_sujo",
         0x2c2f33
     )
-    await enviar_painel_se_necessario(
+    await enviar_ou_restaurar_painel(
         CANAL_CRIAR_FARM_ID,
         BotaoCriarCanalView(),
         "📦 CRIAR CANAL PRIVADO",
         "Clique no botão abaixo para criar seu canal privado de farm.",
+        "criar_farm",
         0x2c2f33
     )
     # Opcional: painel de lives (se houver view)
-    # await enviar_painel_se_necessario(CANAL_LIVES_PAINEL_ID, LiveConfigView(), "🎥 LIVES", "...")
+    # await enviar_ou_restaurar_painel(
+    #     CANAL_LIVES_PAINEL_ID,
+    #     LiveConfigView(),
+    #     "🎥 LIVES",
+    #     "Configure as lives e streamers.",
+    #     "lives",
+    #     0x2c2f33
+    # )
     
     print('Bot completamente pronto e operante!')
 

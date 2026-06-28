@@ -1955,10 +1955,8 @@ class BotaoCriarCanalView(View):
             dados["canais"][user_id] = canal.id
             salvar_dados()
 
-            # Mensagem de sucesso
             await interaction.followup.send(f"✅ Canal criado! Acesse: {canal.mention}", ephemeral=True)
 
-            # Envia o painel do canal
             view = FarmChannelView(interaction.user.id, interaction.user.display_name, canal.id)
             embed = discord.Embed(
                 title="📦 SEU CANAL PRIVADO",
@@ -1970,16 +1968,84 @@ class BotaoCriarCanalView(View):
         except Exception as e:
             await interaction.followup.send(f"❌ Erro ao criar canal: {e}", ephemeral=True)
 
+# ========= FUNÇÃO PARA RESTAURAR PAINÉIS PRINCIPAIS =========
+async def restaurar_paineis_principais():
+    """Apaga as mensagens antigas do bot e recria os painéis principais."""
+    canais_e_views = [
+        (CANAL_COMPRA_VENDA_ID, CompraVendaView(), "💸 COMPRA E VENDA", "Utilize os botões abaixo para registrar compras e vendas."),
+        (CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Registre itens nos baús."),
+        (PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 PAINEL DE CONTROLE - ENTREGAS DE DINHEIRO SUJO", "Acompanhe todas as entregas registradas."),
+        (CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão abaixo para criar seu canal de farm."),
+    ]
+
+    for canal_id, view, titulo, desc in canais_e_views:
+        canal = bot.get_channel(canal_id)
+        if not canal:
+            continue
+
+        # Apaga mensagens antigas do bot (limitado a 200 para evitar muitos requests)
+        async for msg in canal.history(limit=200):
+            if msg.author == bot.user:
+                try:
+                    await msg.delete()
+                except:
+                    pass
+
+        embed = discord.Embed(title=titulo, description=desc, color=0x2c2f33)
+        await canal.send(embed=embed, view=view)
+
+    # Canal de lives (dinâmico)
+    canal_lives = bot.get_channel(CANAL_LIVES_PAINEL_ID)
+    if canal_lives:
+        async for msg in canal_lives.history(limit=200):
+            if msg.author == bot.user:
+                try:
+                    await msg.delete()
+                except:
+                    pass
+        server_id = str(canal_lives.guild.id)
+        live_view = LiveConfigView(server_id)
+        embed_live = await live_view.build_embed()
+        await canal_lives.send(embed=embed_live, view=live_view)
+
+    # Canal de registro (solicitar set)
+    canal_registro = bot.get_channel(CANAL_SOLICITAR_SET_ID)
+    if canal_registro:
+        async for msg in canal_registro.history(limit=200):
+            if msg.author == bot.user:
+                try:
+                    await msg.delete()
+                except:
+                    pass
+        embed_reg = discord.Embed(title="📋 SOLICITAR REGISTRO", description="Clique no botão abaixo para abrir o formulário de registro.", color=0x2c2f33)
+        view_reg = View(timeout=None)
+        btn = Button(label="Abrir Formulário", style=discord.ButtonStyle.primary, emoji="📝")
+        async def btn_callback(interaction):
+            modal = SolicitarSetModal()
+            await interaction.response.send_modal(modal)
+        btn.callback = btn_callback
+        view_reg.add_item(btn)
+        await canal_registro.send(embed=embed_reg, view=view_reg)
+
 # ========= COMANDOS E EVENTOS =========
 
 @bot.event
 async def on_ready():
     print(f"Bot logado como {bot.user}")
     carregar_dados()
+
+    # Restaura todos os painéis principais
+    await restaurar_paineis_principais()
+
+    # Restaura canais privados de farm
     await restaurar_canais_farms()
+
+    # Inicia loop de lives
     live_check_loop.start()
-    # Atualiza ranking ao iniciar
+
+    # Atualiza ranking
     await atualizar_ranking()
+
     print("Bot pronto!")
 
 @bot.event
@@ -1988,15 +2054,13 @@ async def on_message(message):
         return
     await bot.process_commands(message)
 
-# Comando para criar painel de registro
+# Comando para criar painel de registro (caso queira manualmente)
 @bot.command(name="registrar")
 async def registrar(ctx):
     if ctx.channel.id != CANAL_SOLICITAR_SET_ID:
         await ctx.send("Use o canal correto para solicitar registro.", delete_after=10)
         return
     modal = SolicitarSetModal()
-    await ctx.send("Preencha o formulário abaixo:", view=View(timeout=None))
-    # Para abrir o modal, precisamos de interação, então usamos um botão
     view = View(timeout=None)
     btn = Button(label="Abrir Formulário", style=discord.ButtonStyle.primary, emoji="📝")
     async def btn_callback(interaction):
@@ -2070,7 +2134,6 @@ async def remover_membro(ctx, member: discord.Member):
     if not pode_remover_membro(ctx.author):
         await ctx.send("Você não tem permissão.", ephemeral=True)
         return
-    # Implementação de remoção (limpeza de logs, etc.)
     total = await limpar_logs_usuario(member.id, member.display_name)
     await ctx.send(f"Usuário {member.mention} removido. {total} mensagens limpas.")
     await log_admin_embed("🚫 USUÁRIO REMOVIDO", f"Admin: {ctx.author.mention}\nUsuário: {member.mention}\nMensagens limpas: {total}", 0x4f545c)

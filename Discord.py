@@ -1168,22 +1168,22 @@ async def restaurar_canais_farms():
                     )
                     await canal.send(embed=embed, view=FarmChannelViewPersistent())
 
-# ========= FUNÇÃO PARA ENVIAR PAINÉIS COM PERSISTÊNCIA =========
-async def enviar_ou_restaurar_painel(canal_id, view, embed_titulo, embed_descricao, chave_painel, cor=0x2c2f33):
+# ========= FUNÇÃO PARA ENVIAR PAINÉIS COM PERSISTÊNCIA (MODIFICADA) =========
+async def enviar_ou_restaurar_painel(canal_id, view, embed_titulo, embed_descricao, chave_painel, cor=0x2c2f33, force=False):
     """
     Envia o painel se a mensagem salva não existir mais.
+    Se force=True, recria o painel mesmo que exista.
     Atualiza o ID da mensagem no dicionário de painéis.
     """
     canal = bot.get_channel(canal_id)
     if not canal:
         print(f"[PAINEL] Canal {canal_id} não encontrado.")
-        return
+        return False
 
-    # Verifica se temos um ID salvo para este painel
     msg_id = dados["painels"].get(chave_painel)
     mensagem_existente = False
 
-    if msg_id:
+    if msg_id and not force:
         try:
             msg = await canal.fetch_message(msg_id)
             if msg.author == bot.user and msg.components:
@@ -1194,15 +1194,87 @@ async def enviar_ou_restaurar_painel(canal_id, view, embed_titulo, embed_descric
             print(f"[PAINEL] Sem permissão para acessar mensagem {msg_id} no canal {canal_id}")
             mensagem_existente = False
 
-    if not mensagem_existente:
-        # Se não existir, envia nova e salva o ID
+    # Se force=True, deletar mensagem antiga se existir
+    if force and msg_id:
+        try:
+            msg = await canal.fetch_message(msg_id)
+            await msg.delete()
+        except:
+            pass
+
+    if not mensagem_existente or force:
         embed = discord.Embed(title=embed_titulo, description=embed_descricao, color=cor)
         msg = await canal.send(embed=embed, view=view)
         dados["painels"][chave_painel] = msg.id
         salvar_dados()
         print(f"[PAINEL] Painel '{chave_painel}' enviado/restaurado no canal {canal_id}.")
+        return True
     else:
         print(f"[PAINEL] Painel '{chave_painel}' já existe (ID {msg_id}).")
+        return False
+
+# ========= COMANDOS PARA RECARREGAR PAINÉIS =========
+@bot.command(name="recarregar_paineis")
+@commands.has_permissions(administrator=True)
+async def recarregar_paineis(ctx):
+    """Recarrega todos os painéis principais (compra/venda, baus, dinheiro sujo, criar farm)."""
+    await ctx.send("🔄 Recarregando painéis...")
+    
+    # Forçar recriação de todos os painéis
+    await enviar_ou_restaurar_painel(
+        CANAL_COMPRA_VENDA_ID,
+        CompraVendaView(),
+        "💸 COMPRA E VENDA",
+        "Clique nos botões abaixo para registrar uma **venda** ou **compra** de produtos.",
+        "compra_venda",
+        0x2c2f33,
+        force=True
+    )
+    await enviar_ou_restaurar_painel(
+        CANAL_PAINEL_BAUS_ID,
+        BauView(),
+        "📦 BAÚS",
+        "Selecione o tipo de baú para registrar itens.",
+        "baus",
+        0x2c2f33,
+        force=True
+    )
+    await enviar_ou_restaurar_painel(
+        PAINEL_CONTROLE_DINHEIRO_SUJO_ID,
+        PainelControleView(),
+        "💰 CONTROLE DE DINHEIRO SUJO",
+        "Gerencie entregas de dinheiro sujo.",
+        "dinheiro_sujo",
+        0x2c2f33,
+        force=True
+    )
+    await enviar_ou_restaurar_painel(
+        CANAL_CRIAR_FARM_ID,
+        BotaoCriarCanalView(),
+        "📦 CRIAR CANAL PRIVADO",
+        "Clique no botão abaixo para criar seu canal privado de farm.",
+        "criar_farm",
+        0x2c2f33,
+        force=True
+    )
+    await ctx.send("✅ Todos os painéis foram recarregados!")
+
+@bot.command(name="recarregar_painel")
+@commands.has_permissions(administrator=True)
+async def recarregar_painel(ctx, chave: str):
+    """Recarrega um painel específico. Chaves: compra_venda, baus, dinheiro_sujo, criar_farm"""
+    chaves_validas = {
+        "compra_venda": (CANAL_COMPRA_VENDA_ID, CompraVendaView(), "💸 COMPRA E VENDA", "Clique nos botões abaixo para registrar uma **venda** ou **compra** de produtos.", 0x2c2f33),
+        "baus": (CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", 0x2c2f33),
+        "dinheiro_sujo": (PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", 0x2c2f33),
+        "criar_farm": (CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão abaixo para criar seu canal privado de farm.", 0x2c2f33)
+    }
+    if chave not in chaves_validas:
+        await ctx.send(f"Chave inválida. Use uma destas: {', '.join(chaves_validas.keys())}")
+        return
+    canal_id, view, titulo, desc, cor = chaves_validas[chave]
+    await enviar_ou_restaurar_painel(canal_id, view, titulo, desc, chave, cor, force=True)
+    await ctx.send(f"✅ Painel '{chave}' recarregado!")
 
 # ========= INICIALIZAÇÃO E EVENTOS =========
 async def setup_hook():
@@ -1224,14 +1296,15 @@ async def on_ready():
     if not live_check_loop.is_running():
         live_check_loop.start()
     
-    # Restaura/recria os painéis principais
+    # Restaura/recria os painéis principais (sem forçar, só se não existirem)
     await enviar_ou_restaurar_painel(
         CANAL_COMPRA_VENDA_ID,
         CompraVendaView(),
         "💸 COMPRA E VENDA",
         "Clique nos botões abaixo para registrar uma **venda** ou **compra** de produtos.",
         "compra_venda",
-        0x2c2f33
+        0x2c2f33,
+        force=False
     )
     await enviar_ou_restaurar_painel(
         CANAL_PAINEL_BAUS_ID,
@@ -1239,7 +1312,8 @@ async def on_ready():
         "📦 BAÚS",
         "Selecione o tipo de baú para registrar itens.",
         "baus",
-        0x2c2f33
+        0x2c2f33,
+        force=False
     )
     await enviar_ou_restaurar_painel(
         PAINEL_CONTROLE_DINHEIRO_SUJO_ID,
@@ -1247,7 +1321,8 @@ async def on_ready():
         "💰 CONTROLE DE DINHEIRO SUJO",
         "Gerencie entregas de dinheiro sujo.",
         "dinheiro_sujo",
-        0x2c2f33
+        0x2c2f33,
+        force=False
     )
     await enviar_ou_restaurar_painel(
         CANAL_CRIAR_FARM_ID,
@@ -1255,20 +1330,12 @@ async def on_ready():
         "📦 CRIAR CANAL PRIVADO",
         "Clique no botão abaixo para criar seu canal privado de farm.",
         "criar_farm",
-        0x2c2f33
+        0x2c2f33,
+        force=False
     )
-    # Opcional: painel de lives (se houver view)
-    # await enviar_ou_restaurar_painel(
-    #     CANAL_LIVES_PAINEL_ID,
-    #     LiveConfigView(),
-    #     "🎥 LIVES",
-    #     "Configure as lives e streamers.",
-    #     "lives",
-    #     0x2c2f33
-    # )
     
     print('Bot completamente pronto e operante!')
 
-# Iniciando o bot
+# ========= INICIANDO O BOT =========
 if __name__ == "__main__":
     bot.run(TOKEN)

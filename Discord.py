@@ -1015,6 +1015,18 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             await interaction.followup.send("Farm registrada com sucesso!", ephemeral=True)
         await atualizar_ranking()
 
+# ========= PAINEL SOLICITAR SET =========
+class SolicitarSetView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    @discord.ui.button(label="📋 Solicitar Set", style=discord.ButtonStyle.primary, emoji="📋", custom_id="btn_solicitar_set")
+    async def solicitar_set(self, interaction, button):
+        # Verifica se o usuário já tem cargo de membro (para evitar spam)
+        if is_membro(interaction.user):
+            await interaction.response.send_message("❌ Você já possui o cargo de membro. Não é necessário solicitar novamente.", ephemeral=True)
+            return
+        await interaction.response.send_modal(SolicitarSetModal())
+
 # ========= BOTÃO CRIAR CANAL =========
 class BotaoCriarCanalView(View):
     def __init__(self):
@@ -1118,6 +1130,7 @@ async def enviar_ou_restaurar_painel(canal_id, view, embed_titulo, embed_descric
 @commands.has_permissions(administrator=True)
 async def recarregar_paineis(ctx):
     await ctx.send("🔄 Recarregando todos os painéis...")
+    await enviar_ou_restaurar_painel(CANAL_SOLICITAR_SET_ID, SolicitarSetView(), "📋 SOLICITAR SET", "Clique no botão abaixo para solicitar seu registro (set).", "solicitar_set", force=True)
     await enviar_ou_restaurar_painel(CANAL_COMPRA_VENDA_ID, CompraVendaView(), "💸 COMPRA E VENDA", "Clique nos botões abaixo para registrar uma **venda** ou **compra**.", "compra_venda", force=True)
     await enviar_ou_restaurar_painel(CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", "baus", force=True)
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo", force=True)
@@ -1130,6 +1143,7 @@ async def recarregar_paineis(ctx):
 @commands.has_permissions(administrator=True)
 async def recarregar_painel(ctx, chave: str):
     chaves_validas = {
+        "solicitar_set": (CANAL_SOLICITAR_SET_ID, SolicitarSetView(), "📋 SOLICITAR SET", "Clique no botão abaixo para solicitar seu registro (set).", 0x2c2f33),
         "compra_venda": (CANAL_COMPRA_VENDA_ID, CompraVendaView(), "💸 COMPRA E VENDA", "Clique nos botões abaixo para registrar uma **venda** ou **compra**.", 0x2c2f33),
         "baus": (CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", 0x2c2f33),
         "dinheiro_sujo": (PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", 0x2c2f33),
@@ -1152,7 +1166,7 @@ async def setup_hook():
     bot.add_view(PainelControleView())
     bot.add_view(BotaoCriarCanalView())
     bot.add_view(FarmChannelViewPersistent())
-    # AprovarSetView NÃO é persistente – não precisa ser registrada globalmente
+    bot.add_view(SolicitarSetView())  # persistente
     bot.add_view(PedidoClienteView())
     bot.add_view(PedidoFuncionarioView())
 
@@ -1166,6 +1180,8 @@ async def on_ready():
     if not live_check_loop.is_running():
         live_check_loop.start()
 
+    # Envia/restaura todos os painéis, incluindo o de Solicitar Set
+    await enviar_ou_restaurar_painel(CANAL_SOLICITAR_SET_ID, SolicitarSetView(), "📋 SOLICITAR SET", "Clique no botão abaixo para solicitar seu registro (set).", "solicitar_set")
     await enviar_ou_restaurar_painel(CANAL_COMPRA_VENDA_ID, CompraVendaView(), "💸 COMPRA E VENDA", "Clique nos botões abaixo para registrar uma **venda** ou **compra**.", "compra_venda")
     await enviar_ou_restaurar_painel(CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", "baus")
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo")
@@ -1173,7 +1189,7 @@ async def on_ready():
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique no botão abaixo para fazer o seu pedido.", "clientes")
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "🛠️ PAINEL DE FUNCIONÁRIOS", "Clique no botão abaixo para solicitar equipamentos.", "funcionarios")
 
-    print('✅ Bot pronto e painéis verificados!')
+    print('✅ Bot pronto e todos os painéis verificados!')
 
 if __name__ == "__main__":
     bot.run(TOKEN)

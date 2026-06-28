@@ -1909,6 +1909,7 @@ class ConfirmResetSemanalView(View):
 class BotaoCriarCanalView(View):
     def __init__(self):
         super().__init__(timeout=None)
+
     @discord.ui.button(label="Criar Meu Canal Privado", style=discord.ButtonStyle.success, emoji="📦")
     async def criar_canal(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1948,4 +1949,132 @@ class BotaoCriarCanalView(View):
             cargo_admin = interaction.guild.get_role(CARGO_00_ID)
             if cargo_admin:
                 overwrites[cargo_admin] = discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True, manage_channels=True)
-       
+
+            # Criação do canal
+            canal = await categoria.create_text_channel(name=nome_canal, overwrites=overwrites)
+            dados["canais"][user_id] = canal.id
+            salvar_dados()
+
+            # Mensagem de sucesso
+            await interaction.followup.send(f"✅ Canal criado! Acesse: {canal.mention}", ephemeral=True)
+
+            # Envia o painel do canal
+            view = FarmChannelView(interaction.user.id, interaction.user.display_name, canal.id)
+            embed = discord.Embed(
+                title="📦 SEU CANAL PRIVADO",
+                description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Depositar Farm\n✏️ Editar Registro\n📋 Meus Registros\n🔄 Reset Semanal",
+                color=0x2c2f33
+            )
+            await canal.send(embed=embed, view=view)
+
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro ao criar canal: {e}", ephemeral=True)
+
+# ========= COMANDOS E EVENTOS =========
+
+@bot.event
+async def on_ready():
+    print(f"Bot logado como {bot.user}")
+    carregar_dados()
+    await restaurar_canais_farms()
+    live_check_loop.start()
+    # Atualiza ranking ao iniciar
+    await atualizar_ranking()
+    print("Bot pronto!")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    await bot.process_commands(message)
+
+# Comando para criar painel de registro
+@bot.command(name="registrar")
+async def registrar(ctx):
+    if ctx.channel.id != CANAL_SOLICITAR_SET_ID:
+        await ctx.send("Use o canal correto para solicitar registro.", delete_after=10)
+        return
+    modal = SolicitarSetModal()
+    await ctx.send("Preencha o formulário abaixo:", view=View(timeout=None))
+    # Para abrir o modal, precisamos de interação, então usamos um botão
+    view = View(timeout=None)
+    btn = Button(label="Abrir Formulário", style=discord.ButtonStyle.primary, emoji="📝")
+    async def btn_callback(interaction):
+        await interaction.response.send_modal(modal)
+    btn.callback = btn_callback
+    view.add_item(btn)
+    await ctx.send("Clique no botão para abrir o formulário:", view=view)
+
+# Comando para criar painel de compra e venda
+@bot.command(name="comprarvenda")
+async def comprar_venda(ctx):
+    if ctx.channel.id != CANAL_COMPRA_VENDA_ID:
+        await ctx.send("Canal incorreto.", delete_after=10)
+        return
+    embed = discord.Embed(title="💸 COMPRA E VENDA", description="Utilize os botões abaixo para registrar compras e vendas.", color=0x2c2f33)
+    await ctx.send(embed=embed, view=CompraVendaView())
+
+# Comando para criar painel de baús
+@bot.command(name="baus")
+async def baus(ctx):
+    if ctx.channel.id != CANAL_PAINEL_BAUS_ID:
+        await ctx.send("Canal incorreto.", delete_after=10)
+        return
+    embed = discord.Embed(title="📦 BAÚS", description="Registre itens nos baús.", color=0x2c2f33)
+    await ctx.send(embed=embed, view=BauView())
+
+# Comando para criar painel de lives
+@bot.command(name="lives")
+async def lives(ctx):
+    if ctx.channel.id != CANAL_LIVES_PAINEL_ID:
+        await ctx.send("Canal incorreto.", delete_after=10)
+        return
+    server_id = str(ctx.guild.id)
+    view = LiveConfigView(server_id)
+    embed = await view.build_embed()
+    await ctx.send(embed=embed, view=view)
+
+# Comando para criar painel de dinheiro sujo
+@bot.command(name="dinheiro")
+async def dinheiro(ctx):
+    if ctx.channel.id != PAINEL_CONTROLE_DINHEIRO_SUJO_ID:
+        await ctx.send("Canal incorreto.", delete_after=10)
+        return
+    embed = discord.Embed(
+        title="💰 PAINEL DE CONTROLE - ENTREGAS DE DINHEIRO SUJO",
+        description=(
+            "Acompanhe todas as entregas registradas.\n\n"
+            "📋 **Histórico Completo** – histórico sem limite, com paginação (◀ ▶).\n"
+            "📊 **Estatísticas** – resumo geral e top 10 por valor.\n"
+            "💰 **Registrar Entrega** – registre uma entrega (nome/ID/vulgo).\n"
+            "🔄 **Atualizar** – recarrega este painel.\n"
+            "🗑️ **Resetar Histórico** – apaga todo o histórico (apenas admins)."
+        ),
+        color=0x2c2f33
+    )
+    await ctx.send(embed=embed, view=PainelControleView())
+
+# Comando para criar canal privado (botão)
+@bot.command(name="criarcanal")
+async def criar_canal_comando(ctx):
+    if ctx.channel.id != CANAL_CRIAR_FARM_ID:
+        await ctx.send("Canal incorreto.", delete_after=10)
+        return
+    embed = discord.Embed(title="📦 CRIAR CANAL PRIVADO", description="Clique no botão abaixo para criar seu canal de farm.", color=0x2c2f33)
+    await ctx.send(embed=embed, view=BotaoCriarCanalView())
+
+# Comando para remover membro (admin)
+@bot.command(name="remover")
+@commands.has_permissions(administrator=True)
+async def remover_membro(ctx, member: discord.Member):
+    if not pode_remover_membro(ctx.author):
+        await ctx.send("Você não tem permissão.", ephemeral=True)
+        return
+    # Implementação de remoção (limpeza de logs, etc.)
+    total = await limpar_logs_usuario(member.id, member.display_name)
+    await ctx.send(f"Usuário {member.mention} removido. {total} mensagens limpas.")
+    await log_admin_embed("🚫 USUÁRIO REMOVIDO", f"Admin: {ctx.author.mention}\nUsuário: {member.mention}\nMensagens limpas: {total}", 0x4f545c)
+
+# ========= INICIALIZAÇÃO =========
+if __name__ == "__main__":
+    bot.run(TOKEN)

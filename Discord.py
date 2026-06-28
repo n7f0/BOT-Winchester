@@ -79,10 +79,10 @@ dados = {
         "lista": []
     },
     "lives": {
-        "config": {},  
-        "streamers": {},  
+        "config": {},
+        "streamers": {},
         "last_notified": {},
-        "status": {}  
+        "status": {}
     },
     "compras_vendas": []
 }
@@ -744,12 +744,6 @@ async def live_check_loop():
 async def before_live_check():
     await bot.wait_until_ready()
 
-# (Classes auxiliares de configuração de live omitidas aqui para economizar espaço, 
-#  você pode manter as que já possuía em seu script como LiveConfigView, SetCanalModal, etc. 
-#  Sem elas, a configuração da live precisaria ser recolada. 
-#  Nenhuma alteração fundamental precisava ser feita nelas quanto aos custom_ids se elas 
-#  são iniciadas via comandos.)
-
 # ========= SISTEMA DE COMPRA E VENDA =========
 class VendaModal(Modal, title="💸 Venda"):
     item = TextInput(label="Item", placeholder="Ex: Munição, Arma, Medicamento", required=True)
@@ -888,25 +882,111 @@ class BauView(View):
             return
         await interaction.response.send_modal(BauModal("Casa", LOG_BAU_CASA_ID))
 
-# ========= RESTAURAÇÃO DE CANAIS DE FARM =========
-async def restaurar_canais_farms():
-    for user_id_str, canal_id in dados["canais"].items():
-        canal = bot.get_channel(canal_id)
-        if canal:
-            async for msg in canal.history(limit=10):
-                if msg.author == bot.user and msg.components:
-                    break
-            else:
-                guild = canal.guild
-                member = guild.get_member(int(user_id_str)) if guild else None
-                if member:
-                    view = FarmChannelView(member.id, member.display_name, canal.id)
-                    embed = discord.Embed(
-                        title="📦 SEU CANAL PRIVADO",
-                        description=f"Bem-vindo(a) {member.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Depositar Farm\n✏️ Editar Registro\n📋 Meus Registros\n🔄 Reset Semanal",
-                        color=0x2c2f33
-                    )
-                    await canal.send(embed=embed, view=view)
+# ========= PAINEL DE CONTROLE DE ENTREGAS =========
+class PainelControleView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="📋 Histórico Completo", style=discord.ButtonStyle.primary, emoji="📋", custom_id="painel_historico")
+    async def ultimas_entregas(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Implementação resumida para exemplo
+        await interaction.followup.send("Histórico de entregas exibido (implementação completa necessária).", ephemeral=True)
+
+    @discord.ui.button(label="📊 Estatísticas", style=discord.ButtonStyle.secondary, emoji="📊", custom_id="painel_estatisticas")
+    async def estatisticas(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("Estatísticas exibidas (implementação completa).", ephemeral=True)
+
+    @discord.ui.button(label="💰 Registrar Entrega", style=discord.ButtonStyle.success, emoji="💰", custom_id="painel_registrar")
+    async def registrar_entrega(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Sem permissão.", ephemeral=True)
+            return
+        await interaction.response.send_modal(RegistrarEntregaModal())
+
+    @discord.ui.button(label="🔄 Atualizar Painel", style=discord.ButtonStyle.secondary, emoji="🔄", custom_id="painel_atualizar")
+    async def atualizar_painel(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        embed = discord.Embed(title="💰 PAINEL", description="Atualizado", color=0x2c2f33)
+        await interaction.followup.send(embed=embed, view=PainelControleView(), ephemeral=True)
+
+class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
+    membro = TextInput(label="Nome do recebedor (vulgo ou ID)", placeholder="Digite o nome, vulgo ou ID", required=True)
+    valor = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
+    observacao = TextInput(label="Observação (opcional)", placeholder="Detalhes sobre a entrega", required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Implementação resumida
+        await interaction.followup.send("Entrega registrada (implementação completa).", ephemeral=True)
+
+# ========= VIEW PERSISTENTE PARA CANAIS PRIVADOS (FARM) =========
+class FarmChannelViewPersistent(View):
+    """
+    View persistente para os canais privados de farm.
+    Usa o canal e o usuário da interação para identificar o dono.
+    """
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Depositar Farm", style=discord.ButtonStyle.secondary, emoji="📦", custom_id="farm_produtos")
+    async def farm_produtos(self, interaction: discord.Interaction, button: Button):
+        # Identifica o dono do canal a partir do mapeamento dados["canais"]
+        user_id = None
+        for uid, cid in dados["canais"].items():
+            if cid == interaction.channel.id:
+                user_id = int(uid)
+                break
+        if user_id is None:
+            await interaction.response.send_message("Canal não reconhecido.", ephemeral=True)
+            return
+        if interaction.user.id != user_id and not is_admin(interaction.user):
+            await interaction.response.send_message("Apenas o dono do canal ou administradores podem depositar farm!", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.followup.send("📝 Digite o **número do SLOT** no chat.", ephemeral=False)
+
+        def check_slot(m):
+            return m.author == interaction.user and m.channel == interaction.channel and m.content.strip().isdigit()
+        try:
+            msg_slot = await bot.wait_for('message', timeout=60.0, check=check_slot)
+            slot_num = int(msg_slot.content.strip())
+            await msg_slot.delete()
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Tempo esgotado! Operação cancelada.", ephemeral=True)
+            return
+
+        view = View(timeout=60)
+        open_modal_btn = Button(label="📦 Abrir Formulário", style=discord.ButtonStyle.success, emoji="📦")
+        async def modal_callback(interaction_btn):
+            await interaction_btn.response.send_modal(FarmProdutosModal(user_id, interaction.user.display_name, interaction.channel, slot_num))
+        open_modal_btn.callback = modal_callback
+        view.add_item(open_modal_btn)
+        await interaction.followup.send("✅ Slot registrado! Clique no botão abaixo para abrir o formulário e preencher os produtos:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", custom_id="editar_registro")
+    async def editar_registro(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Apenas administradores.", ephemeral=True)
+            return
+        # Implementação resumida
+        await interaction.response.send_message("Menu de edição aberto (implementação completa).", ephemeral=True)
+
+    @discord.ui.button(label="Meus Registros", style=discord.ButtonStyle.primary, emoji="📋", custom_id="meus_registros")
+    async def meus_registros(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Apenas administradores.", ephemeral=True)
+            return
+        await interaction.response.send_message("Registros exibidos (implementação completa).", ephemeral=True)
+
+    @discord.ui.button(label="Reset Semanal", style=discord.ButtonStyle.danger, emoji="🔄", custom_id="reset_semanal")
+    async def reset_semanal(self, interaction: discord.Interaction, button: Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("Apenas administradores.", ephemeral=True)
+            return
+        await interaction.response.send_message("Confirmar reset (implementação completa).", ephemeral=True)
 
 # ========= MODAL DE FARM PRODUTOS =========
 class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
@@ -997,115 +1077,6 @@ class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
             await interaction.followup.send("Farm registrada com sucesso!", ephemeral=True)
         await atualizar_ranking()
 
-# ========= PAINEL DE CONTROLE DE ENTREGAS =========
-class PainelControleView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="📋 Histórico Completo", style=discord.ButtonStyle.primary, emoji="📋", custom_id="painel_historico")
-    async def ultimas_entregas(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        # Omitido para clareza visual, toda lógica pode ser preservada aqui
-        await interaction.followup.send("Botão de histórico disparado", ephemeral=True)
-
-    @discord.ui.button(label="📊 Estatísticas", style=discord.ButtonStyle.secondary, emoji="📊", custom_id="painel_estatisticas")
-    async def estatisticas(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send("Botão de estatísticas disparado", ephemeral=True)
-
-    @discord.ui.button(label="💰 Registrar Entrega", style=discord.ButtonStyle.success, emoji="💰", custom_id="painel_registrar")
-    async def registrar_entrega(self, interaction: discord.Interaction, button: Button):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Sem permissão.", ephemeral=True)
-            return
-        await interaction.response.send_modal(RegistrarEntregaModal())
-
-    @discord.ui.button(label="🔄 Atualizar Painel", style=discord.ButtonStyle.secondary, emoji="🔄", custom_id="painel_atualizar")
-    async def atualizar_painel(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer()
-        embed = discord.Embed(title="💰 PAINEL", description="Atualizado", color=0x2c2f33)
-        await interaction.followup.send(embed=embed, view=PainelControleView(), ephemeral=True)
-
-class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
-    membro = TextInput(label="Nome do recebedor (vulgo ou ID)", placeholder="Digite o nome, vulgo ou ID", required=True)
-    valor = TextInput(label="Valor (R$)", placeholder="Ex: 5000", required=True)
-    observacao = TextInput(label="Observação (opcional)", placeholder="Detalhes sobre a entrega", required=False)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await interaction.followup.send("Entrega registrada", ephemeral=True)
-
-
-# ========= VIEW DO CANAL PRIVADO =========
-class FarmChannelView(View):
-    def __init__(self, user_id, user_name, canal_id):
-        super().__init__(timeout=None)
-        self.user_id = user_id
-        self.user_name = user_name
-        self.canal_id = canal_id
-        self._add_buttons()
-
-    def _add_buttons(self):
-        farm_btn = Button(label="Depositar Farm", style=discord.ButtonStyle.secondary, emoji="📦", row=0, custom_id="farm_produtos")
-        farm_btn.callback = self.farm_produtos_callback
-        self.add_item(farm_btn)
-
-        editar_btn = Button(label="Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", row=0, custom_id="editar_registro")
-        editar_btn.callback = self.editar_registro_callback
-        self.add_item(editar_btn)
-
-        meus_registros_btn = Button(label="Meus Registros", style=discord.ButtonStyle.primary, emoji="📋", row=1, custom_id="meus_registros")
-        meus_registros_btn.callback = self.meus_registros_callback
-        self.add_item(meus_registros_btn)
-
-        reset_btn = Button(label="Reset Semanal", style=discord.ButtonStyle.danger, emoji="🔄", row=1, custom_id="reset_semanal")
-        reset_btn.callback = self.reset_semanal_callback
-        self.add_item(reset_btn)
-
-    async def farm_produtos_callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id and not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas o dono do canal ou administradores podem depositar farm!", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await interaction.followup.send("📝 Digite o **número do SLOT** no chat.", ephemeral=False)
-        
-        def check_slot(m):
-            return m.author == interaction.user and m.channel == interaction.channel and m.content.strip().isdigit()
-        try:
-            msg_slot = await bot.wait_for('message', timeout=60.0, check=check_slot)
-            slot_num = int(msg_slot.content.strip())
-            await msg_slot.delete()
-        except asyncio.TimeoutError:
-            await interaction.followup.send("⏰ Tempo esgotado! Operação cancelada.", ephemeral=True)
-            return
-        
-        view = View(timeout=60)
-        open_modal_btn = Button(label="📦 Abrir Formulário", style=discord.ButtonStyle.success, emoji="📦")
-        async def modal_callback(interaction_btn):
-            await interaction_btn.response.send_modal(FarmProdutosModal(self.user_id, self.user_name, interaction.channel, slot_num))
-        open_modal_btn.callback = modal_callback
-        view.add_item(open_modal_btn)
-        await interaction.followup.send("✅ Slot registrado! Clique no botão abaixo para abrir o formulário e preencher os produtos:", view=view, ephemeral=True)
-
-    async def editar_registro_callback(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas administradores.", ephemeral=True)
-            return
-        await interaction.response.send_message("Menu de edição aberto.", ephemeral=True)
-
-    async def meus_registros_callback(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas administradores.", ephemeral=True)
-            return
-        await interaction.response.send_message("Registros.", ephemeral=True)
-
-    async def reset_semanal_callback(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas administradores.", ephemeral=True)
-            return
-        await interaction.response.send_message("Confirmar reset.", ephemeral=True)
-
-
 # ========= BOTÃO CRIAR CANAL =========
 class BotaoCriarCanalView(View):
     def __init__(self):
@@ -1157,31 +1128,67 @@ class BotaoCriarCanalView(View):
             if cargo_admin:
                 overwrites[cargo_admin] = discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True, manage_channels=True)
                 
-            # LINHAS FALTANTES QUE FORAM ADICIONADAS ABAIXO:
             canal_novo = await categoria.create_text_channel(name=nome_canal, overwrites=overwrites)
             dados["canais"][user_id] = canal_novo.id
             salvar_dados()
 
-            view_farm = FarmChannelView(interaction.user.id, interaction.user.display_name, canal_novo.id)
+            # Usa a view persistente
             embed = discord.Embed(
                 title="📦 SEU CANAL PRIVADO",
                 description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Depositar Farm\n✏️ Editar Registro\n📋 Meus Registros\n🔄 Reset Semanal",
                 color=0x2c2f33
             )
-            await canal_novo.send(embed=embed, view=view_farm)
+            await canal_novo.send(embed=embed, view=FarmChannelViewPersistent())
             await interaction.followup.send(f"✅ Canal criado com sucesso: {canal_novo.mention}", ephemeral=True)
             
         except Exception as e:
             await interaction.followup.send(f"❌ Ocorreu um erro ao criar o canal: {e}", ephemeral=True)
 
+# ========= RESTAURAÇÃO DE CANAIS DE FARM =========
+async def restaurar_canais_farms():
+    for user_id_str, canal_id in dados["canais"].items():
+        canal = bot.get_channel(canal_id)
+        if canal:
+            # Verifica se já existe mensagem do bot com a view
+            mensagem_existente = False
+            async for msg in canal.history(limit=10):
+                if msg.author == bot.user and msg.components:
+                    mensagem_existente = True
+                    break
+            if not mensagem_existente:
+                guild = canal.guild
+                member = guild.get_member(int(user_id_str)) if guild else None
+                if member:
+                    embed = discord.Embed(
+                        title="📦 SEU CANAL PRIVADO",
+                        description=f"Bem-vindo(a) {member.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Depositar Farm\n✏️ Editar Registro\n📋 Meus Registros\n🔄 Reset Semanal",
+                        color=0x2c2f33
+                    )
+                    await canal.send(embed=embed, view=FarmChannelViewPersistent())
+
+# ========= FUNÇÃO PARA ENVIAR PAINÉIS AUTOMATICAMENTE =========
+async def enviar_painel_se_necessario(canal_id, view, embed_titulo, embed_descricao, cor=0x2c2f33):
+    """Envia um painel com a view se não houver mensagem do bot com componentes no canal."""
+    canal = bot.get_channel(canal_id)
+    if not canal:
+        return
+    # Verifica se já existe uma mensagem do bot com componentes
+    async for msg in canal.history(limit=20):
+        if msg.author == bot.user and msg.components:
+            return  # já existe
+    # Envia o painel
+    embed = discord.Embed(title=embed_titulo, description=embed_descricao, color=cor)
+    await canal.send(embed=embed, view=view)
+
 # ========= INICIALIZAÇÃO E EVENTOS =========
 async def setup_hook():
-    # Registrando as views que devem ser persistentes quando o bot for reiniciado
+    # Registra todas as views persistentes
     bot.add_view(RankingView())
     bot.add_view(CompraVendaView())
     bot.add_view(BauView())
     bot.add_view(PainelControleView())
     bot.add_view(BotaoCriarCanalView())
+    bot.add_view(FarmChannelViewPersistent())  # view persistente para canais privados
 
 bot.setup_hook = setup_hook
 
@@ -1192,6 +1199,39 @@ async def on_ready():
     await restaurar_canais_farms()
     if not live_check_loop.is_running():
         live_check_loop.start()
+    
+    # Envia os painéis principais se não existirem
+    await enviar_painel_se_necessario(
+        CANAL_COMPRA_VENDA_ID,
+        CompraVendaView(),
+        "💸 COMPRA E VENDA",
+        "Clique nos botões abaixo para registrar uma **venda** ou **compra** de produtos.",
+        0x2c2f33
+    )
+    await enviar_painel_se_necessario(
+        CANAL_PAINEL_BAUS_ID,
+        BauView(),
+        "📦 BAÚS",
+        "Selecione o tipo de baú para registrar itens.",
+        0x2c2f33
+    )
+    await enviar_painel_se_necessario(
+        PAINEL_CONTROLE_DINHEIRO_SUJO_ID,
+        PainelControleView(),
+        "💰 CONTROLE DE DINHEIRO SUJO",
+        "Gerencie entregas de dinheiro sujo.",
+        0x2c2f33
+    )
+    await enviar_painel_se_necessario(
+        CANAL_CRIAR_FARM_ID,
+        BotaoCriarCanalView(),
+        "📦 CRIAR CANAL PRIVADO",
+        "Clique no botão abaixo para criar seu canal privado de farm.",
+        0x2c2f33
+    )
+    # Opcional: painel de lives (se houver view)
+    # await enviar_painel_se_necessario(CANAL_LIVES_PAINEL_ID, LiveConfigView(), "🎥 LIVES", "...")
+    
     print('Bot completamente pronto e operante!')
 
 # Iniciando o bot

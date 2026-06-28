@@ -99,11 +99,9 @@ def carregar_dados():
     try:
         with open("dados_bot.json", "r", encoding="utf-8") as f:
             loaded = json.load(f)
-            # Atualiza apenas as chaves existentes, mantendo a estrutura padrão para as que faltam
             for key in dados:
                 if key in loaded:
                     dados[key] = loaded[key]
-            # Migrações específicas
             if "lives" in dados:
                 if "streamers" in dados["lives"]:
                     for server_id, streamers_dict in list(dados["lives"]["streamers"].items()):
@@ -121,7 +119,6 @@ def carregar_dados():
                                     "observacao": data_item.get("observacao", "")
                                 })
                             dados["lives"]["streamers"][server_id] = nova_lista
-                # Garantir subchaves
                 if "config" not in dados["lives"]:
                     dados["lives"]["config"] = {}
                 if "last_notified" not in dados["lives"]:
@@ -136,18 +133,15 @@ def carregar_dados():
                 dados["compras_vendas"] = []
             if "painels" not in dados:
                 dados["painels"] = {}
-            # Garantir campos de porcentagem
             if "vip_fac" not in dados["pedidos"]["config"]["porcentagens"]:
                 dados["pedidos"]["config"]["porcentagens"]["vip_fac"] = 10
             if "vip_fac" not in dados["pedidos_funcionarios"]["config"]["porcentagens"]:
                 dados["pedidos_funcionarios"]["config"]["porcentagens"]["vip_fac"] = 10
-            # Garantir "usuarios_banidos"
             if "usuarios_banidos" not in dados:
                 dados["usuarios_banidos"] = []
             salvar_dados()
             return True
     except FileNotFoundError:
-        # Arquivo não existe, cria com os dados padrão
         salvar_dados()
         return True
     except Exception as e:
@@ -274,7 +268,7 @@ async def limpar_logs_usuario(user_id, user_name):
 # ========= INTENTS E BOT =========
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True   # Ative no portal do Discord
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -1158,7 +1152,7 @@ async def setup_hook():
     bot.add_view(PainelControleView())
     bot.add_view(BotaoCriarCanalView())
     bot.add_view(FarmChannelViewPersistent())
-    bot.add_view(AprovarSetView("0", 0))  # Registrando para capturar eventos de sets pendentes
+    # AprovarSetView NÃO é persistente – não precisa ser registrada globalmente
     bot.add_view(PedidoClienteView())
     bot.add_view(PedidoFuncionarioView())
 
@@ -1172,7 +1166,6 @@ async def on_ready():
     if not live_check_loop.is_running():
         live_check_loop.start()
 
-    # Restaura os painéis (verifica no histórico)
     await enviar_ou_restaurar_painel(CANAL_COMPRA_VENDA_ID, CompraVendaView(), "💸 COMPRA E VENDA", "Clique nos botões abaixo para registrar uma **venda** ou **compra**.", "compra_venda")
     await enviar_ou_restaurar_painel(CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", "baus")
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo")

@@ -801,7 +801,7 @@ class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
         await interaction.response.defer(ephemeral=True, thinking=True)
         await interaction.followup.send("Entrega registrada (implementação completa).", ephemeral=True)
 
-# ========= PAINEL DE CLIENTES (RESERVA CLIENTES) =========
+# ========= PAINEL DE CLIENTES =========
 class PedidoClienteModal(Modal, title="Criar reserva"):
     nome_cliente = TextInput(label="Nome do cliente", placeholder="Digite o nome do cliente", required=True)
     quantidade = TextInput(label="Quantidade", placeholder="Ex: 1000", required=True)
@@ -809,28 +809,71 @@ class PedidoClienteModal(Modal, title="Criar reserva"):
 
     async def on_submit(self, interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
-        nome_val = self.nome_cliente.value.strip()
-        qtd_val = self.quantidade.value.strip()
-        obs_val = self.observacao.value.strip() or "Nenhuma"
+        nome = self.nome_cliente.value.strip()
+        qtd_str = self.quantidade.value.strip()
+        obs = self.observacao.value.strip() or "Nenhuma"
 
-        pedido_id = str(int(datetime.now(timezone.utc).timestamp()))
+        try:
+            qtd = float(qtd_str.replace(",", "."))
+        except:
+            await interaction.followup.send("❌ Quantidade inválida!", ephemeral=True)
+            return
+
+        # Valor total calculado como quantidade * 1000 (exemplo)
+        valor_total = qtd * 1000
+
+        # Obtém porcentagens
+        p = dados["pedidos"]["config"]["porcentagens"]
+        cliente_pct = p.get("cliente", 50)
+        maquina_pct = p.get("maquina", 40)
+        fac_pct = p.get("fac", 5)
+        membros_pct = p.get("membros", 5)
+        vip_pct = p.get("vip_fac", 10)
+
+        # Cálculo da distribuição
+        valor_cliente = valor_total * (cliente_pct / 100)
+        valor_maquina = valor_total * (maquina_pct / 100)
+        valor_fac = valor_total * (fac_pct / 100)
+        valor_membros = valor_total * (membros_pct / 100)
+        # VIP é um bônus para a facção (somado à facção)
+        valor_fac_com_vip = valor_total * ((fac_pct + vip_pct) / 100)
+
+        reserva_id = len(dados["pedidos"]["lista"]) + 1
         pedido = {
-            "id": pedido_id,
+            "id": reserva_id,
             "cliente_id": interaction.user.id,
-            "nome_cliente": nome_val,
-            "quantidade": qtd_val,
-            "observacao": obs_val,
+            "nome_cliente": nome,
+            "quantidade": qtd,
+            "valor_total": valor_total,
+            "observacao": obs,
             "status": "pendente",
             "data": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         }
         dados["pedidos"]["lista"].append(pedido)
         salvar_dados()
 
-        await log_reserva_cliente_embed(
-            "📋 NOVA RESERVA (CLIENTE)",
-            f"**Cliente responsável:** {interaction.user.mention}\n**Nome do cliente:** {nome_val}\n**Quantidade:** {qtd_val}\n**Observação:** {obs_val}",
-            0x2ecc71
+        # Log detalhado
+        embed = discord.Embed(
+            title=f"📋 NOVA RESERVA (CLIENTE)",
+            description=f"Reserva #{reserva_id} criada por {interaction.user.mention}",
+            color=0x2ecc71,
+            timestamp=datetime.now(timezone.utc)
         )
+        embed.add_field(name="Cliente", value=nome, inline=True)
+        embed.add_field(name="Valor Total", value=f"R$ {valor_total:,.2f}", inline=True)
+        embed.add_field(name="Prazo", value="Hoje", inline=True)
+        embed.add_field(name="Descontado", value="Sim", inline=True)
+        embed.add_field(name="Observação", value=obs, inline=False)
+        distrib = (
+            f"**Cliente:** R$ {valor_cliente:,.2f} ({cliente_pct}%)\n"
+            f"**Máquina:** R$ {valor_maquina:,.2f} ({maquina_pct}%)\n"
+            f"**Facção:** R$ {valor_fac_com_vip:,.2f} ({fac_pct + vip_pct}% incluindo VIP {vip_pct}%)\n"
+            f"**Membros:** R$ {valor_membros:,.2f} ({membros_pct}%)"
+        )
+        embed.add_field(name="Distribuição", value=distrib, inline=False)
+        embed.set_footer(text=datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M"))
+
+        await log_reserva_cliente_embed(embed.title, embed.description, embed.color, fields=embed.fields)
         await interaction.followup.send("✅ Reserva criada com sucesso!", ephemeral=True)
 
 class EditarPorcentagensClienteModal(Modal, title="Editar Porcentagens - Clientes"):
@@ -904,26 +947,59 @@ class PedidoFuncionarioModal(Modal, title="Nova reserva"):
     async def on_submit(self, interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         nome_val = self.nome.value.strip()
-        qtd_val = self.quantidade.value.strip()
+        qtd_str = self.quantidade.value.strip()
 
-        pedido_id = str(int(datetime.now(timezone.utc).timestamp()))
+        try:
+            qtd = float(qtd_str.replace(",", "."))
+        except:
+            await interaction.followup.send("❌ Quantidade inválida!", ephemeral=True)
+            return
+
+        valor_total = qtd * 1000
+
+        p = dados["pedidos_funcionarios"]["config"]["porcentagens"]
+        func_pct = p.get("funcionario", 50)
+        maquina_pct = p.get("maquina", 40)
+        fac_pct = p.get("fac", 5)
+        vip_pct = p.get("vip_fac", 10)
+
+        valor_func = valor_total * (func_pct / 100)
+        valor_maquina = valor_total * (maquina_pct / 100)
+        valor_fac_com_vip = valor_total * ((fac_pct + vip_pct) / 100)
+
+        reserva_id = len(dados["pedidos_funcionarios"]["lista"]) + 1
         pedido = {
-            "id": pedido_id,
+            "id": reserva_id,
             "funcionario_id": interaction.user.id,
             "nome": nome_val,
-            "quantidade": qtd_val,
+            "quantidade": qtd,
+            "valor_total": valor_total,
             "status": "pendente",
             "data": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         }
         dados["pedidos_funcionarios"]["lista"].append(pedido)
         salvar_dados()
 
-        await log_reserva_func_embed(
-            "📋 NOVA RESERVA (FUNCIONÁRIO)",
-            f"**Funcionário responsável:** {interaction.user.mention}\n**Nome:** {nome_val}\n**Quantidade lavada:** {qtd_val}",
-            0x3498db
+        embed = discord.Embed(
+            title=f"📋 NOVA RESERVA (FUNCIONÁRIO)",
+            description=f"Reserva #{reserva_id} criada por {interaction.user.mention}",
+            color=0x3498db,
+            timestamp=datetime.now(timezone.utc)
         )
-        await interaction.followup.send("✅ Reserva registrada com sucesso!", ephemeral=True)
+        embed.add_field(name="Funcionário", value=nome_val, inline=True)
+        embed.add_field(name="Valor Total", value=f"R$ {valor_total:,.2f}", inline=True)
+        embed.add_field(name="Prazo", value="Hoje", inline=True)
+        embed.add_field(name="Descontado", value="Sim", inline=True)
+        distrib = (
+            f"**Funcionário:** R$ {valor_func:,.2f} ({func_pct}%)\n"
+            f"**Máquina:** R$ {valor_maquina:,.2f} ({maquina_pct}%)\n"
+            f"**Facção:** R$ {valor_fac_com_vip:,.2f} ({fac_pct + vip_pct}% incluindo VIP {vip_pct}%)"
+        )
+        embed.add_field(name="Distribuição", value=distrib, inline=False)
+        embed.set_footer(text=datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M"))
+
+        await log_reserva_func_embed(embed.title, embed.description, embed.color, fields=embed.fields)
+        await interaction.followup.send("✅ Reserva criada com sucesso!", ephemeral=True)
 
 class EditarPorcentagensFuncModal(Modal, title="Editar Porcentagens"):
     funcionario = TextInput(label="% Funcionário", placeholder="Ex: 50", required=True)
@@ -1238,7 +1314,7 @@ async def recarregar_paineis(ctx):
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo", force=True)
     await enviar_ou_restaurar_painel(CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", "criar_farm", force=True)
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "📋 RESERVA CLIENTES", "Gerencie reservas de clientes.", "clientes", force=True)
-    await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", "funcionarios", force=True)
+    await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reservas de funcionários.", "funcionarios", force=True)
     await ctx.send("✅ Todos os painéis foram recarregados!")
 
 @bot.command(name="recarregar_painel")
@@ -1251,7 +1327,7 @@ async def recarregar_painel(ctx, chave: str):
         "dinheiro_sujo": (PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", 0x2c2f33),
         "criar_farm": (CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", 0x2c2f33),
         "clientes": (CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "📋 RESERVA CLIENTES", "Gerencie reservas de clientes.", 0x2c2f33),
-        "funcionarios": (CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", 0x2c2f33)
+        "funcionarios": (CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reservas de funcionários.", 0x2c2f33)
     }
     if chave not in chaves_validas:
         await ctx.send(f"Chave inválida. Use: {', '.join(chaves_validas.keys())}")
@@ -1289,7 +1365,7 @@ async def on_ready():
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo", force=True)
     await enviar_ou_restaurar_painel(CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", "criar_farm", force=True)
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "📋 RESERVA CLIENTES", "Gerencie reservas de clientes.", "clientes", force=True)
-    await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", "funcionarios", force=True)
+    await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reservas de funcionários.", "funcionarios", force=True)
 
     print('✅ Bot pronto e todos os painéis recarregados com sucesso!')
 

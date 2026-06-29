@@ -896,9 +896,9 @@ class PedidoClienteView(View):
         modal.vip_fac.default = str(p.get("vip_fac", 10))
         await interaction.response.send_modal(modal)
 
-# ========= PAINEL DE FUNCIONÁRIOS =========
-class PedidoFuncionarioModal(Modal, title="🧑‍💼 Solicitar Lavagem"):
-    nome = TextInput(label="Nome do funcionário", placeholder="Ex: João Silva", required=True)
+# ========= PAINEL DE FUNCIONÁRIOS (SISTEMA DE RESERVAS) =========
+class PedidoFuncionarioModal(Modal, title="Nova reserva"):
+    nome = TextInput(label="Nome", placeholder="Nome do funcionário", required=True)
     quantidade = TextInput(label="Quantidade que foi lavada", placeholder="Ex: 1000", required=True)
 
     async def on_submit(self, interaction):
@@ -919,13 +919,13 @@ class PedidoFuncionarioModal(Modal, title="🧑‍💼 Solicitar Lavagem"):
         salvar_dados()
 
         await log_reserva_func_embed(
-            "🧑‍💼 NOVA SOLICITAÇÃO DE LAVAGEM",
+            "📋 NOVA RESERVA (FUNCIONÁRIO)",
             f"**Funcionário responsável:** {interaction.user.mention}\n**Nome:** {nome_val}\n**Quantidade lavada:** {qtd_val}",
             0x3498db
         )
-        await interaction.followup.send("✅ Solicitação de lavagem enviada com sucesso!", ephemeral=True)
+        await interaction.followup.send("✅ Reserva registrada com sucesso!", ephemeral=True)
 
-class EditarPorcentagensFuncModal(Modal, title="Editar Porcentagens - Funcionários"):
+class EditarPorcentagensFuncModal(Modal, title="Editar Porcentagens"):
     funcionario = TextInput(label="% Funcionário", placeholder="Ex: 50", required=True)
     maquina = TextInput(label="% Máquina", placeholder="Ex: 40", required=True)
     fac = TextInput(label="% Facção", placeholder="Ex: 5", required=True)
@@ -960,15 +960,15 @@ class EditarPorcentagensFuncModal(Modal, title="Editar Porcentagens - Funcionár
             f"**% VIP Fac:** {novo_vip}%",
             0x3498db
         )
-        await interaction.response.send_message("✅ Porcentagens de funcionários atualizadas com sucesso!", ephemeral=True)
+        await interaction.response.send_message("✅ Porcentagens atualizadas com sucesso!", ephemeral=True)
 
 class PedidoFuncionarioView(View):
     def __init__(self):
         super().__init__(timeout=None)
-    @discord.ui.button(label="Solicitar Lavagem", style=discord.ButtonStyle.primary, emoji="🧑‍💼", custom_id="btn_pedido_func")
-    async def solicitar(self, interaction, button):
+    @discord.ui.button(label="Nova reserva", style=discord.ButtonStyle.primary, emoji="📋", custom_id="btn_pedido_func")
+    async def nova_reserva(self, interaction, button):
         if not is_membro(interaction.user) and not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Apenas funcionários têm permissão para fazer essa solicitação.", ephemeral=True)
+            await interaction.response.send_message("❌ Apenas funcionários têm permissão para fazer reservas.", ephemeral=True)
             return
         await interaction.response.send_modal(PedidoFuncionarioModal())
 
@@ -1238,7 +1238,7 @@ async def recarregar_paineis(ctx):
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo", force=True)
     await enviar_ou_restaurar_painel(CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", "criar_farm", force=True)
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões para fazer um pedido ou editar porcentagens (admin).", "clientes", force=True)
-    await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "🧑‍💼 FUNCIONÁRIOS", "Clique nos botões para solicitar lavagem ou editar porcentagens (admin).", "funcionarios", force=True)
+    await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", "funcionarios", force=True)
     await ctx.send("✅ Todos os painéis foram recarregados!")
 
 @bot.command(name="recarregar_painel")
@@ -1251,7 +1251,7 @@ async def recarregar_painel(ctx, chave: str):
         "dinheiro_sujo": (PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", 0x2c2f33),
         "criar_farm": (CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", 0x2c2f33),
         "clientes": (CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões para fazer um pedido ou editar porcentagens (admin).", 0x2c2f33),
-        "funcionarios": (CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "🧑‍💼 FUNCIONÁRIOS", "Clique nos botões para solicitar lavagem ou editar porcentagens (admin).", 0x2c2f33)
+        "funcionarios": (CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", 0x2c2f33)
     }
     if chave not in chaves_validas:
         await ctx.send(f"Chave inválida. Use: {', '.join(chaves_validas.keys())}")
@@ -1289,7 +1289,7 @@ async def on_ready():
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo", force=True)
     await enviar_ou_restaurar_painel(CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", "criar_farm", force=True)
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões para fazer um pedido ou editar porcentagens (admin).", "clientes", force=True)
-    await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "🧑‍💼 FUNCIONÁRIOS", "Clique nos botões para solicitar lavagem ou editar porcentagens (admin).", "funcionarios", force=True)
+    await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", "funcionarios", force=True)
 
     print('✅ Bot pronto e todos os painéis recarregados com sucesso!')
 

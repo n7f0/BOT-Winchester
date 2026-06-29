@@ -318,6 +318,7 @@ async def atualizar_ranking():
                 except:
                     nome_exibicao = data.get("nome", "Usuário desconhecido")
             ranking.append({"usuario": nome_exibicao, "usuario_id": uid, "rotas": rotas, "total_itens": total_itens})
+        await asyncio.sleep(0)  # cede o controle
 
     ranking_ordenado = sorted(ranking, key=lambda x: x["rotas"], reverse=True)
     for i, item in enumerate(ranking_ordenado):
@@ -350,6 +351,7 @@ async def atualizar_ranking():
             await canal.send(embed=embed, view=RankingView())
         else:
             await canal.send(embed=embed)
+        await asyncio.sleep(0)
 
 class RankingView(View):
     def __init__(self):
@@ -541,6 +543,7 @@ async def check_youtube_lives(streamers):
                     data = await resp.json()
                     for item in data.get("items", []):
                         live_data[ch_id] = item
+        await asyncio.sleep(0)
     return live_data
 
 async def check_tiktok_live(username):
@@ -565,9 +568,10 @@ async def check_tiktok_lives(streamers):
         if not username: continue
         info = await check_tiktok_live(username)
         if info: live_data[username] = info
+        await asyncio.sleep(0)
     return live_data
 
-@tasks.loop(minutes=1)
+@tasks.loop(minutes=2)  # reduzido para 2 minutos para não sobrecarregar
 async def live_check_loop():
     for server_id_str in dados["lives"].get("config", {}):
         config = dados["lives"]["config"][server_id_str]
@@ -656,6 +660,7 @@ async def live_check_loop():
                             await canal.send(content=role_mention, embed=embed, view=view)
             else: status_server[streamer_id]["tiktok"] = False
             if streamer.get("kick"): status_server[streamer_id]["kick"] = False
+            await asyncio.sleep(0)
     salvar_dados()
 
 @live_check_loop.before_loop
@@ -819,10 +824,8 @@ class PedidoClienteModal(Modal, title="Criar reserva"):
             await interaction.followup.send("❌ Quantidade inválida!", ephemeral=True)
             return
 
-        # Valor total calculado como quantidade * 1000 (exemplo)
         valor_total = qtd * 1000
 
-        # Obtém porcentagens
         p = dados["pedidos"]["config"]["porcentagens"]
         cliente_pct = p.get("cliente", 50)
         maquina_pct = p.get("maquina", 40)
@@ -830,12 +833,10 @@ class PedidoClienteModal(Modal, title="Criar reserva"):
         membros_pct = p.get("membros", 5)
         vip_pct = p.get("vip_fac", 10)
 
-        # Cálculo da distribuição
         valor_cliente = valor_total * (cliente_pct / 100)
         valor_maquina = valor_total * (maquina_pct / 100)
         valor_fac = valor_total * (fac_pct / 100)
         valor_membros = valor_total * (membros_pct / 100)
-        # VIP é um bônus para a facção (somado à facção)
         valor_fac_com_vip = valor_total * ((fac_pct + vip_pct) / 100)
 
         reserva_id = len(dados["pedidos"]["lista"]) + 1
@@ -852,7 +853,6 @@ class PedidoClienteModal(Modal, title="Criar reserva"):
         dados["pedidos"]["lista"].append(pedido)
         salvar_dados()
 
-        # Log detalhado
         embed = discord.Embed(
             title=f"📋 NOVA RESERVA (CLIENTE)",
             description=f"Reserva #{reserva_id} criada por {interaction.user.mention}",
@@ -1062,6 +1062,32 @@ class PedidoFuncionarioView(View):
         await interaction.response.send_modal(modal)
 
 # ========= VIEW PERSISTENTE PARA CANAIS PRIVADOS =========
+class ConfirmarResetSemanalView(View):
+    def __init__(self, channel_id):
+        super().__init__(timeout=60)
+        self.channel_id = channel_id
+
+    @discord.ui.button(label="✅ Sim, resetar", style=discord.ButtonStyle.danger, emoji="⚠️")
+    async def confirmar(self, interaction, button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Apenas administradores.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Remove todas as farms de todos os usuários
+        for uid in dados["usuarios"]:
+            dados["usuarios"][uid]["farms"] = []
+        dados["caixa_semana"] = {}
+        salvar_dados()
+        await log_admin_embed("🔄 RESET SEMANAL", f"Reset semanal realizado por {interaction.user.mention}\nTodas as farms foram limpas.", 0x4f545c)
+        await interaction.followup.send("✅ Reset semanal concluído! Todas as farms foram removidas.", ephemeral=True)
+        await atualizar_ranking()
+        self.stop()
+
+    @discord.ui.button(label="❌ Cancelar", style=discord.ButtonStyle.secondary, emoji="❌")
+    async def cancelar(self, interaction, button):
+        await interaction.response.send_message("Reset cancelado.", ephemeral=True)
+        self.stop()
+
 class FarmChannelViewPersistent(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -1100,20 +1126,55 @@ class FarmChannelViewPersistent(View):
     @discord.ui.button(label="Editar Registro", style=discord.ButtonStyle.secondary, emoji="✏️", custom_id="editar_registro")
     async def editar_registro(self, interaction, button):
         if not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas administradores.", ephemeral=True); return
-        await interaction.response.send_message("Menu de edição (implementação completa).", ephemeral=True)
+            await interaction.response.send_message("❌ Apenas administradores podem editar registros.", ephemeral=True)
+            return
+        # Implementação simples: exibe as farms do usuário
+        user_id = None
+        for uid, cid in dados["canais"].items():
+            if cid == interaction.channel.id:
+                user_id = int(uid)
+                break
+        if user_id is None:
+            await interaction.response.send_message("Canal não reconhecido.", ephemeral=True)
+            return
+        user_data = dados["usuarios"].get(str(user_id), {})
+        farms = user_data.get("farms", [])
+        if not farms:
+            await interaction.response.send_message("Nenhuma farm registrada para este usuário.", ephemeral=True)
+            return
+        msg = "**FARMS REGISTRADAS:**\n"
+        for i, farm in enumerate(farms):
+            produtos = ", ".join([f"{p['produto']} ({p['quantidade']})" for p in farm.get("produtos", [])])
+            msg += f"#{i+1} - Slot {farm.get('slot', '?')} - {farm.get('data', '')} - Produtos: {produtos}\n"
+        await interaction.response.send_message(msg[:1900], ephemeral=True)
 
     @discord.ui.button(label="Meus Registros", style=discord.ButtonStyle.primary, emoji="📋", custom_id="meus_registros")
     async def meus_registros(self, interaction, button):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas administradores.", ephemeral=True); return
-        await interaction.response.send_message("Registros (implementação completa).", ephemeral=True)
+        user_id = None
+        for uid, cid in dados["canais"].items():
+            if cid == interaction.channel.id:
+                user_id = int(uid)
+                break
+        if user_id is None:
+            await interaction.response.send_message("Canal não reconhecido.", ephemeral=True)
+            return
+        user_data = dados["usuarios"].get(str(user_id), {})
+        farms = user_data.get("farms", [])
+        if not farms:
+            await interaction.response.send_message("Nenhuma farm registrada para você.", ephemeral=True)
+            return
+        msg = "**SUAS FARMS:**\n"
+        for i, farm in enumerate(farms):
+            produtos = ", ".join([f"{p['produto']} ({p['quantidade']})" for p in farm.get("produtos", [])])
+            msg += f"#{i+1} - Slot {farm.get('slot', '?')} - {farm.get('data', '')} - Produtos: {produtos}\n"
+        await interaction.response.send_message(msg[:1900], ephemeral=True)
 
     @discord.ui.button(label="Reset Semanal", style=discord.ButtonStyle.danger, emoji="🔄", custom_id="reset_semanal")
     async def reset_semanal(self, interaction, button):
         if not is_admin(interaction.user):
-            await interaction.response.send_message("Apenas administradores.", ephemeral=True); return
-        await interaction.response.send_message("Confirmar reset (implementação completa).", ephemeral=True)
+            await interaction.response.send_message("❌ Apenas administradores podem resetar o semanal.", ephemeral=True)
+            return
+        await interaction.response.send_message("⚠️ Tem certeza que deseja resetar todas as farms da semana? Esta ação é irreversível.", view=ConfirmarResetSemanalView(interaction.channel.id), ephemeral=True)
 
 # ========= FARM PRODUTOS MODAL =========
 class FarmProdutosModal(Modal, title="📦 Depositar Farm"):

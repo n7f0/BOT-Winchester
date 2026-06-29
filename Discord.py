@@ -801,15 +801,15 @@ class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
         await interaction.response.defer(ephemeral=True, thinking=True)
         await interaction.followup.send("Entrega registrada (implementação completa).", ephemeral=True)
 
-# ========= PAINEL DE CLIENTES =========
-class PedidoClienteModal(Modal, title="🛒 Fazer Pedido"):
-    produto = TextInput(label="Produto desejado", placeholder="Ex: Munição, Arma", required=True)
-    quantidade = TextInput(label="Quantidade", placeholder="Ex: 50", required=True)
-    observacao = TextInput(label="Observação", placeholder="Detalhes adicionais", required=False)
+# ========= PAINEL DE CLIENTES (RESERVA CLIENTES) =========
+class PedidoClienteModal(Modal, title="Criar reserva"):
+    nome_cliente = TextInput(label="Nome do cliente", placeholder="Digite o nome do cliente", required=True)
+    quantidade = TextInput(label="Quantidade", placeholder="Ex: 1000", required=True)
+    observacao = TextInput(label="Observação", placeholder="Detalhes adicionais (opcional)", required=False)
 
     async def on_submit(self, interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
-        produto_val = self.produto.value.strip()
+        nome_val = self.nome_cliente.value.strip()
         qtd_val = self.quantidade.value.strip()
         obs_val = self.observacao.value.strip() or "Nenhuma"
 
@@ -817,7 +817,7 @@ class PedidoClienteModal(Modal, title="🛒 Fazer Pedido"):
         pedido = {
             "id": pedido_id,
             "cliente_id": interaction.user.id,
-            "produto": produto_val,
+            "nome_cliente": nome_val,
             "quantidade": qtd_val,
             "observacao": obs_val,
             "status": "pendente",
@@ -827,11 +827,11 @@ class PedidoClienteModal(Modal, title="🛒 Fazer Pedido"):
         salvar_dados()
 
         await log_reserva_cliente_embed(
-            "🛒 NOVO PEDIDO (CLIENTE)",
-            f"**Cliente:** {interaction.user.mention}\n**Produto:** {produto_val}\n**Quantidade:** {qtd_val}\n**Observação:** {obs_val}",
+            "📋 NOVA RESERVA (CLIENTE)",
+            f"**Cliente responsável:** {interaction.user.mention}\n**Nome do cliente:** {nome_val}\n**Quantidade:** {qtd_val}\n**Observação:** {obs_val}",
             0x2ecc71
         )
-        await interaction.followup.send("✅ Seu pedido foi realizado e enviado para os responsáveis!", ephemeral=True)
+        await interaction.followup.send("✅ Reserva criada com sucesso!", ephemeral=True)
 
 class EditarPorcentagensClienteModal(Modal, title="Editar Porcentagens - Clientes"):
     cliente = TextInput(label="% Cliente", placeholder="Ex: 55", required=True)
@@ -878,8 +878,8 @@ class PedidoClienteView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Fazer Pedido", style=discord.ButtonStyle.success, emoji="🛒", custom_id="btn_pedido_cliente")
-    async def fazer_pedido(self, interaction, button):
+    @discord.ui.button(label="Criar reserva", style=discord.ButtonStyle.success, emoji="📋", custom_id="btn_pedido_cliente")
+    async def criar_reserva(self, interaction, button):
         await interaction.response.send_modal(PedidoClienteModal())
 
     @discord.ui.button(label="Editar Porcentagens", style=discord.ButtonStyle.primary, emoji="📊", custom_id="btn_editar_porcentagens_cliente")
@@ -1237,7 +1237,7 @@ async def recarregar_paineis(ctx):
     await enviar_ou_restaurar_painel(CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", "baus", force=True)
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo", force=True)
     await enviar_ou_restaurar_painel(CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", "criar_farm", force=True)
-    await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões para fazer um pedido ou editar porcentagens (admin).", "clientes", force=True)
+    await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "📋 RESERVA CLIENTES", "Gerencie reservas de clientes.", "clientes", force=True)
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", "funcionarios", force=True)
     await ctx.send("✅ Todos os painéis foram recarregados!")
 
@@ -1250,7 +1250,7 @@ async def recarregar_painel(ctx, chave: str):
         "baus": (CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", 0x2c2f33),
         "dinheiro_sujo": (PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", 0x2c2f33),
         "criar_farm": (CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", 0x2c2f33),
-        "clientes": (CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões para fazer um pedido ou editar porcentagens (admin).", 0x2c2f33),
+        "clientes": (CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "📋 RESERVA CLIENTES", "Gerencie reservas de clientes.", 0x2c2f33),
         "funcionarios": (CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", 0x2c2f33)
     }
     if chave not in chaves_validas:
@@ -1288,7 +1288,7 @@ async def on_ready():
     await enviar_ou_restaurar_painel(CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", "baus", force=True)
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo", force=True)
     await enviar_ou_restaurar_painel(CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", "criar_farm", force=True)
-    await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões para fazer um pedido ou editar porcentagens (admin).", "clientes", force=True)
+    await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "📋 RESERVA CLIENTES", "Gerencie reservas de clientes.", "clientes", force=True)
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "📋 SISTEMA DE RESERVAS", "Gerencie reserva de funcionários.", "funcionarios", force=True)
 
     print('✅ Bot pronto e todos os painéis recarregados com sucesso!')

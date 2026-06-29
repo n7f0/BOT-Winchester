@@ -801,7 +801,7 @@ class RegistrarEntregaModal(Modal, title="💰 Registrar Entrega"):
         await interaction.response.defer(ephemeral=True, thinking=True)
         await interaction.followup.send("Entrega registrada (implementação completa).", ephemeral=True)
 
-# ========= PAINEL DE CLIENTES =========
+# ========= PAINEL DE CLIENTES (com edição de porcentagens) =========
 class PedidoClienteModal(Modal, title="🛒 Fazer Pedido"):
     produto = TextInput(label="Produto desejado", placeholder="Ex: Munição, Arma", required=True)
     quantidade = TextInput(label="Quantidade", placeholder="Ex: 50", required=True)
@@ -833,12 +833,70 @@ class PedidoClienteModal(Modal, title="🛒 Fazer Pedido"):
         )
         await interaction.followup.send("✅ Seu pedido foi realizado e enviado para os responsáveis!", ephemeral=True)
 
+class EditarPorcentagensModal(Modal, title="Editar Porcentagens e VIP"):
+    cliente = TextInput(label="% Cliente", placeholder="Ex: 55", required=True)
+    maquina = TextInput(label="% Máquina", placeholder="Ex: 40", required=True)
+    fac = TextInput(label="% Facção", placeholder="Ex: 5", required=True)
+    membros = TextInput(label="% Membros", placeholder="Ex: 5", required=True)
+    vip_fac = TextInput(label="% VIP Fac (bônus)", placeholder="Ex: 10", required=True)
+
+    async def on_submit(self, interaction):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Apenas administradores podem editar as porcentagens.", ephemeral=True)
+            return
+        try:
+            novo_cliente = float(self.cliente.value.replace(",", "."))
+            novo_maquina = float(self.maquina.value.replace(",", "."))
+            novo_fac = float(self.fac.value.replace(",", "."))
+            novo_membros = float(self.membros.value.replace(",", "."))
+            novo_vip = float(self.vip_fac.value.replace(",", "."))
+        except ValueError:
+            await interaction.response.send_message("❌ Valores inválidos. Use números (ex: 55).", ephemeral=True)
+            return
+
+        # Atualiza as porcentagens
+        dados["pedidos"]["config"]["porcentagens"]["cliente"] = novo_cliente
+        dados["pedidos"]["config"]["porcentagens"]["maquina"] = novo_maquina
+        dados["pedidos"]["config"]["porcentagens"]["fac"] = novo_fac
+        dados["pedidos"]["config"]["porcentagens"]["membros"] = novo_membros
+        dados["pedidos"]["config"]["porcentagens"]["vip_fac"] = novo_vip
+        dados["pedidos"]["config"]["ultima_edicao"] = interaction.user.id
+        salvar_dados()
+
+        await log_admin_embed(
+            "📊 PORCENTAGENS ATUALIZADAS",
+            f"**Admin:** {interaction.user.mention}\n"
+            f"**% Cliente:** {novo_cliente}%\n"
+            f"**% Máquina:** {novo_maquina}%\n"
+            f"**% Facção:** {novo_fac}%\n"
+            f"**% Membros:** {novo_membros}%\n"
+            f"**% VIP Fac:** {novo_vip}%",
+            0x3498db
+        )
+        await interaction.response.send_message("✅ Porcentagens atualizadas com sucesso!", ephemeral=True)
+
 class PedidoClienteView(View):
     def __init__(self):
         super().__init__(timeout=None)
+
     @discord.ui.button(label="Fazer Pedido", style=discord.ButtonStyle.success, emoji="🛒", custom_id="btn_pedido_cliente")
     async def fazer_pedido(self, interaction, button):
         await interaction.response.send_modal(PedidoClienteModal())
+
+    @discord.ui.button(label="Editar Porcentagens", style=discord.ButtonStyle.primary, emoji="📊", custom_id="btn_editar_porcentagens")
+    async def editar_porcentagens(self, interaction, button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Apenas administradores podem editar as porcentagens.", ephemeral=True)
+            return
+        # Pré-preenche os campos com os valores atuais
+        p = dados["pedidos"]["config"]["porcentagens"]
+        modal = EditarPorcentagensModal()
+        modal.cliente.default = str(p.get("cliente", 50))
+        modal.maquina.default = str(p.get("maquina", 40))
+        modal.fac.default = str(p.get("fac", 5))
+        modal.membros.default = str(p.get("membros", 5))
+        modal.vip_fac.default = str(p.get("vip_fac", 10))
+        await interaction.response.send_modal(modal)
 
 # ========= PAINEL DE FUNCIONÁRIOS =========
 class PedidoFuncionarioModal(Modal, title="🛠️ Solicitar Equipamento"):
@@ -1021,7 +1079,6 @@ class SolicitarSetView(View):
         super().__init__(timeout=None)
     @discord.ui.button(label="📋 Solicitar Set", style=discord.ButtonStyle.primary, emoji="📋", custom_id="btn_solicitar_set")
     async def solicitar_set(self, interaction, button):
-        # Verifica se o usuário já tem cargo de membro (para evitar spam)
         if is_membro(interaction.user):
             await interaction.response.send_message("❌ Você já possui o cargo de membro. Não é necessário solicitar novamente.", ephemeral=True)
             return
@@ -1135,7 +1192,7 @@ async def recarregar_paineis(ctx):
     await enviar_ou_restaurar_painel(CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", "baus", force=True)
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo", force=True)
     await enviar_ou_restaurar_painel(CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", "criar_farm", force=True)
-    await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique no botão abaixo para fazer o seu pedido.", "clientes", force=True)
+    await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões abaixo para fazer um pedido ou editar porcentagens (apenas admin).", "clientes", force=True)
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "🛠️ PAINEL DE FUNCIONÁRIOS", "Clique no botão abaixo para solicitar equipamentos.", "funcionarios", force=True)
     await ctx.send("✅ Todos os painéis foram recarregados!")
 
@@ -1148,7 +1205,7 @@ async def recarregar_painel(ctx, chave: str):
         "baus": (CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", 0x2c2f33),
         "dinheiro_sujo": (PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", 0x2c2f33),
         "criar_farm": (CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", 0x2c2f33),
-        "clientes": (CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique no botão abaixo para fazer o seu pedido.", 0x2c2f33),
+        "clientes": (CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões abaixo para fazer um pedido ou editar porcentagens (apenas admin).", 0x2c2f33),
         "funcionarios": (CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "🛠️ PAINEL DE FUNCIONÁRIOS", "Clique no botão abaixo para solicitar equipamentos.", 0x2c2f33)
     }
     if chave not in chaves_validas:
@@ -1166,7 +1223,7 @@ async def setup_hook():
     bot.add_view(PainelControleView())
     bot.add_view(BotaoCriarCanalView())
     bot.add_view(FarmChannelViewPersistent())
-    bot.add_view(SolicitarSetView())  # persistente
+    bot.add_view(SolicitarSetView())
     bot.add_view(PedidoClienteView())
     bot.add_view(PedidoFuncionarioView())
 
@@ -1180,13 +1237,13 @@ async def on_ready():
     if not live_check_loop.is_running():
         live_check_loop.start()
 
-    # Envia/restaura todos os painéis, incluindo o de Solicitar Set
+    # Envia/restaura todos os painéis
     await enviar_ou_restaurar_painel(CANAL_SOLICITAR_SET_ID, SolicitarSetView(), "📋 SOLICITAR SET", "Clique no botão abaixo para solicitar seu registro (set).", "solicitar_set")
     await enviar_ou_restaurar_painel(CANAL_COMPRA_VENDA_ID, CompraVendaView(), "💸 COMPRA E VENDA", "Clique nos botões abaixo para registrar uma **venda** ou **compra**.", "compra_venda")
     await enviar_ou_restaurar_painel(CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", "baus")
     await enviar_ou_restaurar_painel(PAINEL_CONTROLE_DINHEIRO_SUJO_ID, PainelControleView(), "💰 CONTROLE DE DINHEIRO SUJO", "Gerencie entregas de dinheiro sujo.", "dinheiro_sujo")
     await enviar_ou_restaurar_painel(CANAL_CRIAR_FARM_ID, BotaoCriarCanalView(), "📦 CRIAR CANAL PRIVADO", "Clique no botão para criar seu canal privado.", "criar_farm")
-    await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique no botão abaixo para fazer o seu pedido.", "clientes")
+    await enviar_ou_restaurar_painel(CANAL_RESERVAS_CLIENTES_ID, PedidoClienteView(), "🛒 PAINEL DE CLIENTES", "Clique nos botões abaixo para fazer um pedido ou editar porcentagens (apenas admin).", "clientes")
     await enviar_ou_restaurar_painel(CANAL_RESERVAS_FUNC_PAINEL_ID, PedidoFuncionarioView(), "🛠️ PAINEL DE FUNCIONÁRIOS", "Clique no botão abaixo para solicitar equipamentos.", "funcionarios")
 
     print('✅ Bot pronto e todos os painéis verificados!')

@@ -318,7 +318,7 @@ async def atualizar_ranking():
                 except:
                     nome_exibicao = data.get("nome", "Usuário desconhecido")
             ranking.append({"usuario": nome_exibicao, "usuario_id": uid, "rotas": rotas, "total_itens": total_itens})
-        await asyncio.sleep(0)  # cede o controle
+        await asyncio.sleep(0)
 
     ranking_ordenado = sorted(ranking, key=lambda x: x["rotas"], reverse=True)
     for i, item in enumerate(ranking_ordenado):
@@ -571,7 +571,7 @@ async def check_tiktok_lives(streamers):
         await asyncio.sleep(0)
     return live_data
 
-@tasks.loop(minutes=2)  # reduzido para 2 minutos para não sobrecarregar
+@tasks.loop(minutes=2)
 async def live_check_loop():
     for server_id_str in dados["lives"].get("config", {}):
         config = dados["lives"]["config"][server_id_str]
@@ -1063,9 +1063,9 @@ class PedidoFuncionarioView(View):
 
 # ========= VIEW PERSISTENTE PARA CANAIS PRIVADOS =========
 class ConfirmarResetSemanalView(View):
-    def __init__(self, channel_id):
+    def __init__(self, channel):
         super().__init__(timeout=60)
-        self.channel_id = channel_id
+        self.channel = channel
 
     @discord.ui.button(label="✅ Sim, resetar", style=discord.ButtonStyle.danger, emoji="⚠️")
     async def confirmar(self, interaction, button):
@@ -1073,13 +1073,22 @@ class ConfirmarResetSemanalView(View):
             await interaction.response.send_message("❌ Apenas administradores.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        # Remove todas as farms de todos os usuários
+        # Limpa todas as farms
         for uid in dados["usuarios"]:
             dados["usuarios"][uid]["farms"] = []
         dados["caixa_semana"] = {}
         salvar_dados()
         await log_admin_embed("🔄 RESET SEMANAL", f"Reset semanal realizado por {interaction.user.mention}\nTodas as farms foram limpas.", 0x4f545c)
         await interaction.followup.send("✅ Reset semanal concluído! Todas as farms foram removidas.", ephemeral=True)
+        
+        # Envia um novo painel no canal privado (abaixo dos registros antigos)
+        embed = discord.Embed(
+            title="📦 SEU CANAL PRIVADO",
+            description=f"Bem-vindo(a) {interaction.user.mention}!\n\n🔒 Apenas você e administradores têm acesso.\n\n**BOTÕES:**\n📦 Depositar Farm\n✏️ Editar Registro\n📋 Meus Registros\n🔄 Reset Semanal",
+            color=0x2c2f33
+        )
+        await self.channel.send(embed=embed, view=FarmChannelViewPersistent())
+        
         await atualizar_ranking()
         self.stop()
 
@@ -1128,7 +1137,6 @@ class FarmChannelViewPersistent(View):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Apenas administradores podem editar registros.", ephemeral=True)
             return
-        # Implementação simples: exibe as farms do usuário
         user_id = None
         for uid, cid in dados["canais"].items():
             if cid == interaction.channel.id:
@@ -1174,7 +1182,12 @@ class FarmChannelViewPersistent(View):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Apenas administradores podem resetar o semanal.", ephemeral=True)
             return
-        await interaction.response.send_message("⚠️ Tem certeza que deseja resetar todas as farms da semana? Esta ação é irreversível.", view=ConfirmarResetSemanalView(interaction.channel.id), ephemeral=True)
+        # Passa o canal atual para a view de confirmação
+        await interaction.response.send_message(
+            "⚠️ Tem certeza que deseja resetar todas as farms da semana? Esta ação é irreversível.",
+            view=ConfirmarResetSemanalView(interaction.channel),
+            ephemeral=True
+        )
 
 # ========= FARM PRODUTOS MODAL =========
 class FarmProdutosModal(Modal, title="📦 Depositar Farm"):
@@ -1419,7 +1432,7 @@ async def on_ready():
     if not live_check_loop.is_running():
         live_check_loop.start()
 
-    # Força o recarregamento de todos os painéis para aplicar as novas views
+    # Força o recarregamento de todos os painéis
     await enviar_ou_restaurar_painel(CANAL_SOLICITAR_SET_ID, SolicitarSetView(), "📋 SOLICITAR SET", "Clique no botão abaixo para solicitar seu registro (set).", "solicitar_set", force=True)
     await enviar_ou_restaurar_painel(CANAL_COMPRA_VENDA_ID, CompraVendaView(), "💸 COMPRA E VENDA", "Clique nos botões abaixo para registrar uma **venda** ou **compra**.", "compra_venda", force=True)
     await enviar_ou_restaurar_painel(CANAL_PAINEL_BAUS_ID, BauView(), "📦 BAÚS", "Selecione o tipo de baú para registrar itens.", "baus", force=True)
